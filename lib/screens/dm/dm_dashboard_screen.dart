@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:biosyn_report_flutter/theme/colors.dart';
 import 'package:biosyn_report_flutter/widgets/bottom_nav.dart';
+import 'package:biosyn_report_flutter/widgets/sync_status_indicator.dart';
 import 'package:biosyn_report_flutter/models/coaching_report.dart';
 import 'package:biosyn_report_flutter/utils/export_utils.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -246,6 +247,9 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    // Sync Status Indicator
+                    const SyncStatusIndicator(),
+                    const SizedBox(height: 16),
                   // Stats Cards
                   Row(
                     children: [
@@ -636,6 +640,129 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                                           ],
                                         ),
                                         const SizedBox(height: 16),
+                                        // Trend Chart
+                                        if (visitCount > 1) ...[
+                                          Container(
+                                            height: 120,
+                                            padding: const EdgeInsets.all(12),
+                                            decoration: BoxDecoration(
+                                              color: Colors.white,
+                                              borderRadius: BorderRadius.circular(8),
+                                              border: Border.all(color: AppColors.gray200),
+                                            ),
+                                            child: LineChart(
+                                              LineChartData(
+                                                gridData: FlGridData(
+                                                  show: true,
+                                                  drawVerticalLine: false,
+                                                  getDrawingHorizontalLine: (value) {
+                                                    return FlLine(
+                                                      color: AppColors.gray200,
+                                                      strokeWidth: 1,
+                                                      dashArray: [3, 3],
+                                                    );
+                                                  },
+                                                ),
+                                                titlesData: FlTitlesData(
+                                                  leftTitles: AxisTitles(
+                                                    sideTitles: SideTitles(
+                                                      showTitles: true,
+                                                      reservedSize: 35,
+                                                      getTitlesWidget: (value, meta) {
+                                                        return Text(
+                                                          value.toStringAsFixed(1),
+                                                          style: const TextStyle(
+                                                            color: AppColors.gray600,
+                                                            fontSize: 10,
+                                                          ),
+                                                        );
+                                                      },
+                                                    ),
+                                                  ),
+                                                  bottomTitles: AxisTitles(
+                                                    sideTitles: SideTitles(
+                                                      showTitles: true,
+                                                      reservedSize: 30,
+                                                      getTitlesWidget: (value, meta) {
+                                                        if (value.toInt() >= 0 && value.toInt() < visits.length) {
+                                                          return Padding(
+                                                            padding: const EdgeInsets.only(top: 4),
+                                                            child: Text(
+                                                              'V${value.toInt() + 1}',
+                                                              style: const TextStyle(
+                                                                color: AppColors.gray600,
+                                                                fontSize: 10,
+                                                              ),
+                                                            ),
+                                                          );
+                                                        }
+                                                        return const Text('');
+                                                      },
+                                                    ),
+                                                  ),
+                                                  rightTitles: const AxisTitles(
+                                                    sideTitles: SideTitles(showTitles: false),
+                                                  ),
+                                                  topTitles: const AxisTitles(
+                                                    sideTitles: SideTitles(showTitles: false),
+                                                  ),
+                                                ),
+                                                borderData: FlBorderData(
+                                                  show: true,
+                                                  border: Border.all(color: AppColors.gray200),
+                                                ),
+                                                lineBarsData: [
+                                                  LineChartBarData(
+                                                    spots: visits.asMap().entries.map((entry) {
+                                                      return FlSpot(
+                                                        entry.key.toDouble(),
+                                                        entry.value['score'] as double,
+                                                      );
+                                                    }).toList(),
+                                                    isCurved: true,
+                                                    color: AppColors.primaryCyan,
+                                                    barWidth: 3,
+                                                    dotData: FlDotData(
+                                                      show: true,
+                                                      getDotPainter: (spot, percent, barData, index) {
+                                                        return FlDotCirclePainter(
+                                                          radius: 4,
+                                                          color: AppColors.primaryBlue,
+                                                          strokeWidth: 2,
+                                                          strokeColor: Colors.white,
+                                                        );
+                                                      },
+                                                    ),
+                                                    belowBarData: BarAreaData(
+                                                      show: true,
+                                                      color: AppColors.primaryCyan.withOpacity(0.1),
+                                                    ),
+                                                  ),
+                                                ],
+                                                minY: 0,
+                                                maxY: 6,
+                                                lineTouchData: LineTouchData(
+                                                  touchTooltipData: LineTouchTooltipData(
+                                                    getTooltipItems: (List<LineBarSpot> touchedSpots) {
+                                                      return touchedSpots.map((LineBarSpot touchedSpot) {
+                                                        final visit = visits[touchedSpot.x.toInt()];
+                                                        return LineTooltipItem(
+                                                          '${DateFormat('MMM dd').format(DateTime.parse(visit['date']))}\n${touchedSpot.y.toStringAsFixed(2)}/6',
+                                                          const TextStyle(
+                                                            color: Colors.white,
+                                                            fontWeight: FontWeight.bold,
+                                                          ),
+                                                        );
+                                                      }).toList();
+                                                    },
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 16),
+                                        ],
+                                        // Visits Grid
                                         LayoutBuilder(
                                           builder: (context, constraints) {
                                             final availableWidth = constraints.maxWidth;

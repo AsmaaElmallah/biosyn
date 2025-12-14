@@ -104,6 +104,7 @@ class BottomNav extends StatelessWidget {
     {'id': 'dashboard', 'label': 'Dashboard', 'icon': Icons.home},
     {'id': 'users', 'label': 'Users', 'icon': Icons.people},
     {'id': 'reports', 'label': 'Reports', 'icon': Icons.description},
+    {'id': 'plans', 'label': 'Plans', 'icon': Icons.calendar_month},
     {'id': 'profile', 'label': 'Profile', 'icon': Icons.settings},
   ];
 }

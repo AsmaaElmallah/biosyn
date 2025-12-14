@@ -125,6 +125,40 @@ class CoachingReport {
     );
   }
 
+  /// From Supabase JSON (snake_case)
+  factory CoachingReport.fromSupabaseJson(Map<String, dynamic> json) {
+    return CoachingReport(
+      date: json['date']?.toString() ?? '',
+      dmId: json['dm_id']?.toString() ?? '',
+      dmName: json['dm_name']?.toString() ?? '',
+      mrId: json['mr_id']?.toString() ?? '',
+      mrName: json['mr_name']?.toString() ?? '',
+      punctuality: json['punctuality']?.toString(),
+      dressCode: json['dress_code']?.toString(),
+      timeManagement: json['time_management']?.toString(),
+      pharmacyFeedback: json['pharmacy_feedback']?.toString(),
+      reviewProfile: json['review_profile']?.toString(),
+      brandBonding: json['brand_bonding']?.toString(),
+      smartObjectives: json['smart_objectives']?.toString(),
+      opening: json['opening']?.toString(),
+      patientProfile: json['patient_profile']?.toString(),
+      engaging: json['engaging']?.toString(),
+      insightfulQuestions: json['insightful_questions']?.toString(),
+      activeListening: json['active_listening']?.toString(),
+      linkFeatures: json['link_features']?.toString(),
+      productKnowledge: json['product_knowledge']?.toString(),
+      eDetailing: json['e_detailing']?.toString(),
+      answeringQuestions: json['answering_questions']?.toString(),
+      summarizeCall: json['summarize_call']?.toString(),
+      askCommitment: json['ask_commitment']?.toString(),
+      bridging: json['bridging']?.toString(),
+      selfAssessment: json['self_assessment']?.toString(),
+      strengths: json['strengths']?.toString(),
+      improvements: json['improvements']?.toString(),
+      filledWithMR: json['filled_with_mr']?.toString(),
+    );
+  }
+
   double getAverageScore() {
     final scores = [
       pharmacyFeedback,

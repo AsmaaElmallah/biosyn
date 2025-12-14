@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:biosyn_report_flutter/theme/colors.dart';
 import 'package:biosyn_report_flutter/widgets/bottom_nav.dart';
+import 'package:biosyn_report_flutter/widgets/connectivity_indicator.dart';
+import 'package:biosyn_report_flutter/widgets/sync_status_indicator.dart';
 import 'package:biosyn_report_flutter/models/coaching_report.dart';
 import 'package:fl_chart/fl_chart.dart';
 
@@ -225,6 +227,9 @@ class GMDashboardScreen extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    // Sync Status Indicator
+                    const SyncStatusIndicator(),
+                    const SizedBox(height: 16),
                   // Stats Cards
                   Row(
                     children: [
@@ -708,86 +713,130 @@ class GMDashboardScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 24),
                   // Action Buttons
-                  Row(
+                  Column(
                     children: [
-                      Expanded(
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                gradient: AppColors.primaryGradientHorizontal,
+                                borderRadius: BorderRadius.circular(12),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: AppColors.primaryBlue.withOpacity(0.3),
+                                    blurRadius: 15,
+                                    offset: const Offset(0, 5),
+                                  ),
+                                ],
+                              ),
+                              child: Material(
+                                color: Colors.transparent,
+                                child: InkWell(
+                                  onTap: () => onExport(),
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+                                    child: const Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(Icons.file_download, color: Colors.white, size: 20),
+                                        SizedBox(width: 8),
+                                        Text(
+                                          'Export Report',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: InkWell(
+                              onTap: () {
+                                onTabChange('reports');
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  border: Border.all(
+                                    color: AppColors.primaryBlue,
+                                    width: 2,
+                                  ),
+                                  borderRadius: BorderRadius.circular(12),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.05),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: const Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.trending_up, color: AppColors.primaryBlue, size: 20),
+                                    SizedBox(width: 8),
+                                    Text(
+                                      'View Analytics',
+                                      style: TextStyle(
+                                        color: AppColors.primaryBlue,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      InkWell(
+                        onTap: () {
+                          onTabChange('plans');
+                        },
                         child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
                           decoration: BoxDecoration(
-                            gradient: AppColors.primaryGradientHorizontal,
+                            color: Colors.white,
+                            border: Border.all(
+                              color: AppColors.primaryCyan,
+                              width: 2,
+                            ),
                             borderRadius: BorderRadius.circular(12),
                             boxShadow: [
                               BoxShadow(
-                                color: AppColors.primaryBlue.withOpacity(0.3),
-                                blurRadius: 15,
-                                offset: const Offset(0, 5),
+                                color: Colors.black.withOpacity(0.05),
+                                blurRadius: 10,
+                                offset: const Offset(0, 2),
                               ),
                             ],
                           ),
-                          child: Material(
-                            color: Colors.transparent,
-                            child: InkWell(
-                              onTap: () => onExport(),
-                              borderRadius: BorderRadius.circular(12),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
-                                  child: const Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(Icons.file_download, color: Colors.white, size: 20),
-                                      SizedBox(width: 8),
-                                      Text(
-                                        'Export Report',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.calendar_month, color: AppColors.primaryCyan, size: 20),
+                              SizedBox(width: 8),
+                              Text(
+                                'View Plans',
+                                style: TextStyle(
+                                  color: AppColors.primaryCyan,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500,
                                 ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: InkWell(
-                          onTap: () {
-                            onTabChange('reports');
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              border: Border.all(
-                                color: AppColors.primaryBlue,
-                                width: 2,
                               ),
-                              borderRadius: BorderRadius.circular(12),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.05),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            child: const Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.trending_up, color: AppColors.primaryBlue, size: 20),
-                                SizedBox(width: 8),
-                                Text(
-                                  'View Analytics',
-                                  style: TextStyle(
-                                    color: AppColors.primaryBlue,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ],
-                            ),
+                            ],
                           ),
                         ),
                       ),

@@ -9,13 +9,37 @@ import 'package:biosyn_report_flutter/screens/dm/coaching_form_screen.dart';
 import 'package:biosyn_report_flutter/screens/gm/gm_dashboard_screen.dart';
 import 'package:biosyn_report_flutter/screens/gm/gm_reports_screen.dart';
 import 'package:biosyn_report_flutter/screens/gm/user_management_screen.dart';
+import 'package:biosyn_report_flutter/screens/gm/gm_view_plans_screen.dart';
 import 'package:biosyn_report_flutter/screens/profile_screen.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
 import 'package:biosyn_report_flutter/models/coaching_report.dart';
 import 'package:biosyn_report_flutter/utils/export_utils.dart';
+import 'package:biosyn_report_flutter/services/database_service.dart';
+import 'package:biosyn_report_flutter/services/connectivity_service.dart';
+import 'package:biosyn_report_flutter/services/sync_service.dart';
+import 'package:biosyn_report_flutter/services/auth_service.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:biosyn_report_flutter/config/supabase_config.dart';
+import 'package:flutter/foundation.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize Supabase (only if configured)
+  if (SupabaseConfig.isConfigured) {
+    try {
+      await Supabase.initialize(
+        url: SupabaseConfig.supabaseUrl,
+        anonKey: SupabaseConfig.supabaseAnonKey,
+      );
+      debugPrint('✅ Supabase initialized successfully');
+    } catch (e) {
+      // Supabase not configured or connection failed - continue with local only
+      debugPrint('❌ Supabase initialization failed: $e');
+    }
+  } else {
+    debugPrint('⚠️ Supabase not configured - running in offline mode');
+  }
+  
   runApp(const MyApp());
 }
 
@@ -54,17 +78,42 @@ class _AppNavigatorState extends State<AppNavigator> {
   void initState() {
     super.initState();
     _loadReports();
+    _checkSession();
+  }
+
+  Future<void> _checkSession() async {
+    // Check if user is already logged in
+    final isLoggedIn = await AuthService.isLoggedIn();
+    if (isLoggedIn) {
+      final user = await AuthService.getCurrentUser();
+      if (user != null) {
+        final userRole = user['role'] as String?;
+        setState(() {
+          _userName = user['name'] as String? ?? '';
+          _selectedRole = userRole ?? 'dm';
+          if (userRole == 'dm') {
+            _currentScreen = 'dm-planning';
+            _activeTab = 'planning';
+          } else if (userRole == 'gm') {
+            _currentScreen = 'gm-dashboard';
+            _activeTab = 'dashboard';
+          }
+        });
+      }
+    }
   }
 
   Future<void> _loadReports() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final reportsJson = prefs.getString('biosyn_reports');
-      if (reportsJson != null) {
-        final List<dynamic> decoded = json.decode(reportsJson);
-        setState(() {
-          _reports = decoded.map((r) => CoachingReport.fromJson(r)).toList();
-        });
+      final reports = await DatabaseService.getReports();
+      setState(() {
+        _reports = reports;
+      });
+      
+      // Try to sync if online
+      final isConnected = await ConnectivityService.isConnected();
+      if (isConnected) {
+        SyncService.syncIfNeeded();
       }
     } catch (e) {
       // Handle error
@@ -72,13 +121,26 @@ class _AppNavigatorState extends State<AppNavigator> {
   }
 
   Future<void> _saveReport(CoachingReport report) async {
-    setState(() {
-      _reports = [..._reports, report];
-    });
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final reportsJson = json.encode(_reports.map((r) => r.toJson()).toList());
-      await prefs.setString('biosyn_reports', reportsJson);
+      // Check if online
+      final isConnected = await ConnectivityService.isConnected();
+      
+      // Save to local database
+      await DatabaseService.saveReport(report, synced: isConnected);
+      
+      // Update UI
+      setState(() {
+        _reports = [..._reports, report];
+      });
+      
+      // If online, try to sync immediately
+      if (isConnected) {
+        try {
+          await SyncService.syncIfNeeded();
+        } catch (e) {
+          // Sync failed, will retry later
+        }
+      }
     } catch (e) {
       // Handle error
     }
@@ -97,17 +159,47 @@ class _AppNavigatorState extends State<AppNavigator> {
     });
   }
 
-  void _handleLogin(String username, String password) {
-    setState(() {
-      _userName = username;
-      if (_selectedRole == 'dm') {
-        _currentScreen = 'dm-planning';
-        _activeTab = 'planning';
-      } else {
-        _currentScreen = 'gm-dashboard';
-        _activeTab = 'dashboard';
-      }
-    });
+  Future<void> _handleLogin(String username, String password) async {
+    try {
+      // Use AuthService for authentication
+      final user = await AuthService.signIn(username, password);
+      
+      setState(() {
+        _userName = user['name'] as String? ?? username;
+        final userRole = user['role'] as String?;
+        
+        // Determine screen based on role or selected role
+        if (userRole == 'dm' || _selectedRole == 'dm') {
+          _currentScreen = 'dm-planning';
+          _activeTab = 'planning';
+        } else if (userRole == 'gm' || _selectedRole == 'gm') {
+          _currentScreen = 'gm-dashboard';
+          _activeTab = 'dashboard';
+        } else {
+          // Default based on selected role
+          if (_selectedRole == 'dm') {
+            _currentScreen = 'dm-planning';
+            _activeTab = 'planning';
+          } else {
+            _currentScreen = 'gm-dashboard';
+            _activeTab = 'dashboard';
+          }
+        }
+      });
+    } catch (e) {
+      // Fallback to local authentication if Supabase fails
+      // This allows the app to work even without Supabase configured
+      setState(() {
+        _userName = username;
+        if (_selectedRole == 'dm') {
+          _currentScreen = 'dm-planning';
+          _activeTab = 'planning';
+        } else {
+          _currentScreen = 'gm-dashboard';
+          _activeTab = 'dashboard';
+        }
+      });
+    }
   }
 
   void _handleBackToWelcome() {
@@ -142,6 +234,9 @@ class _AppNavigatorState extends State<AppNavigator> {
             break;
           case 'reports':
             _currentScreen = 'gm-reports';
+            break;
+          case 'plans':
+            _currentScreen = 'gm-view-plans';
             break;
           case 'profile':
             _currentScreen = 'profile';
@@ -185,6 +280,8 @@ class _AppNavigatorState extends State<AppNavigator> {
           },
           activeTab: _activeTab,
           onTabChange: _handleTabChange,
+          dmId: _userName.isNotEmpty ? 'dm_${_userName.hashCode}' : 'dm_001',
+          dmName: _userName.isNotEmpty ? _userName : 'District Manager',
         );
       case 'dm-coaching':
         return CoachingFormScreen(
@@ -310,6 +407,11 @@ class _AppNavigatorState extends State<AppNavigator> {
               }
             }
           },
+          activeTab: _activeTab,
+          onTabChange: _handleTabChange,
+        );
+      case 'gm-view-plans':
+        return GMViewPlansScreen(
           activeTab: _activeTab,
           onTabChange: _handleTabChange,
         );

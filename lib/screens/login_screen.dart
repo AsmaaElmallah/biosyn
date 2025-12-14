@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:biosyn_report_flutter/widgets/logo_widget.dart';
 import 'package:biosyn_report_flutter/theme/colors.dart';
+import 'package:biosyn_report_flutter/services/supabase_service.dart';
 
 class LoginScreen extends StatefulWidget {
   final String role;
@@ -29,29 +30,53 @@ class _LoginScreenState extends State<LoginScreen> {
     return widget.role == 'dm' ? 'District Manager' : 'General Manager';
   }
 
-  void _handleLogin() {
+  Future<void> _handleLogin() async {
     setState(() {
       _error = null;
+      _isLoading = true;
     });
 
     if (_usernameController.text.trim().isEmpty ||
         _passwordController.text.trim().isEmpty) {
       setState(() {
         _error = 'Please enter both username and password';
+        _isLoading = false;
       });
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-    });
-
-    Future.delayed(const Duration(milliseconds: 500), () {
-      widget.onLogin(_usernameController.text, _passwordController.text);
-      setState(() {
-        _isLoading = false;
-      });
-    });
+    try {
+      // Try Supabase authentication
+      await SupabaseService.signIn(
+        _usernameController.text.trim(),
+        _passwordController.text,
+      );
+      
+      // If successful, proceed with login
+      if (mounted) {
+        widget.onLogin(_usernameController.text.trim(), _passwordController.text);
+      }
+    } catch (e) {
+      // If Supabase fails, fallback to local authentication
+      // This allows the app to work even without Supabase configured
+      if (mounted) {
+        setState(() {
+          _error = e.toString().contains('not found') || 
+                   e.toString().contains('Invalid password')
+              ? 'Invalid username or password'
+              : 'Login failed. Using offline mode.';
+        });
+        
+        // Still allow login for offline mode
+        widget.onLogin(_usernameController.text.trim(), _passwordController.text);
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
   }
 
   @override
