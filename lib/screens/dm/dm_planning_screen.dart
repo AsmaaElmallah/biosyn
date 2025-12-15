@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:biosyn_report_flutter/models/plan.dart';
 import 'package:biosyn_report_flutter/services/plan_service.dart';
+import 'package:biosyn_report_flutter/services/supabase_service.dart';
 
 class DMPlanningScreen extends StatefulWidget {
   final Function(String, String, String) onStartCoaching;
@@ -35,30 +36,9 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
   String _view = 'today';
   List<Plan> _plans = [];
   bool _isLoading = true;
-
-  final List<Map<String, String>> _medicalReps = [
-    {'id': '2333', 'name': 'Aya Montaser Saber AbdElhamied'},
-    {'id': '2318', 'name': 'Nancy Samy Shady'},
-    {'id': '2334', 'name': 'Reman Karem'},
-    {'id': '2332', 'name': 'Aml Abdelsattar Mohamad Nossir'},
-    {'id': '2348', 'name': 'Amira Adel'},
-    {'id': '2319', 'name': 'Omnia Fathi Abdel Monem Madara'},
-    {'id': '2336', 'name': 'Farah Selim'},
-    {'id': '2360', 'name': 'Aya Sayed'},
-    {'id': '2361', 'name': 'Doha Elsayed'},
-    {'id': '2339', 'name': 'Haneen Emad Eldeen Zayed'},
-    {'id': '2347', 'name': 'Hanem Mohamed'},
-    {'id': '2349', 'name': 'Rania Tawfik'},
-    {'id': '2350', 'name': 'Eman Mahmoud'},
-    {'id': '2351', 'name': 'Basma Maher'},
-    {'id': '2352', 'name': 'Asmaa Attia'},
-    {'id': '2354', 'name': 'Shorouk Tarek'},
-    {'id': '2355', 'name': 'Mayada Adel'},
-    {'id': '2356', 'name': 'Taghreed Hamdy'},
-    {'id': '2357', 'name': 'Khaled Abd Elgawad'},
-    {'id': '2358', 'name': 'Amira Ibrahim'},
-    {'id': '2359', 'name': 'Mostafa Gamal'},
-  ];
+  List<Map<String, String>> _medicalReps = [];
+  bool _isMrLoading = true;
+  String? _mrError;
 
   String get _dmId => widget.dmId ?? 'dm_001';
   String get _dmName => widget.dmName ?? 'District Manager';
@@ -67,6 +47,7 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
   void initState() {
     super.initState();
     _loadPlans();
+    _loadMedicalReps();
   }
 
   Future<void> _loadPlans() async {
@@ -80,6 +61,35 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
       _loadPlanForSelectedDate();
     } catch (e) {
       setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _loadMedicalReps() async {
+    setState(() {
+      _isMrLoading = true;
+      _mrError = null;
+    });
+
+    try {
+      final mrs = await SupabaseService.getAllMRs();
+      setState(() {
+        _medicalReps = mrs
+            .map((u) => {
+                  'id': (u['id'] ?? '').toString(),
+                  'name': (u['name'] ?? '').toString(),
+                })
+            .toList();
+      });
+    } catch (e) {
+      setState(() {
+        _mrError = 'Failed to load Medical Reps. Please check Supabase connection.';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isMrLoading = false;
+        });
+      }
     }
   }
 
@@ -118,7 +128,10 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
       return;
     }
 
-    final mr = _medicalReps.firstWhere((m) => m['id'] == _selectedMR);
+    final mr = _medicalReps.firstWhere(
+      (m) => m['id'] == _selectedMR,
+      orElse: () => {'id': _selectedMR!, 'name': 'Medical Rep'},
+    );
     widget.onStartCoaching(
       DateFormat('yyyy-MM-dd').format(_selectedDate),
       mr['id']!,
@@ -136,7 +149,10 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
 
     try {
       final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
-      final mr = _medicalReps.firstWhere((m) => m['id'] == _selectedMR);
+      final mr = _medicalReps.firstWhere(
+        (m) => m['id'] == _selectedMR,
+        orElse: () => {'id': _selectedMR!, 'name': 'Medical Rep'},
+      );
       
       // Check if plan exists
       final existingPlan = await PlanService.getPlanByDate(_dmId, dateStr);
@@ -501,43 +517,67 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 16),
-                                DropdownButtonFormField<String>(
-                                  value: _selectedMR,
-                                  isExpanded: true,
-                                  decoration: InputDecoration(
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                      borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+                                if (_isMrLoading)
+                                  const Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.all(8.0),
+                                      child: CircularProgressIndicator(),
                                     ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                      borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+                                  )
+                                else if (_mrError != null)
+                                  Text(
+                                    _mrError!,
+                                    style: const TextStyle(
+                                      color: AppColors.error,
+                                      fontSize: 14,
                                     ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                      borderSide: const BorderSide(color: AppColors.primaryCyan, width: 2),
+                                  )
+                                else if (_medicalReps.isEmpty)
+                                  const Text(
+                                    'No Medical Representatives found.\nPlease ask the General Manager to create MRs from User Management.',
+                                    style: TextStyle(
+                                      color: AppColors.gray600,
+                                      fontSize: 14,
                                     ),
-                                    filled: true,
-                                    fillColor: Colors.white,
-                                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                                  ),
-                                  hint: const Text('Choose a Medical Rep...'),
-                                  items: _medicalReps.map((mr) {
-                                    return DropdownMenuItem(
-                                      value: mr['id'],
-                                      child: Text(
-                                        '${mr['name']} - ${mr['id']}',
-                                        overflow: TextOverflow.ellipsis,
-                                        maxLines: 1,
+                                  )
+                                else
+                                  DropdownButtonFormField<String>(
+                                    value: _selectedMR,
+                                    isExpanded: true,
+                                    decoration: InputDecoration(
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                        borderSide: const BorderSide(color: AppColors.gray200, width: 2),
                                       ),
-                                    );
-                                  }).toList(),
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _selectedMR = value;
-                                    });
-                                  },
-                                ),
+                                      enabledBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                        borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+                                      ),
+                                      focusedBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                        borderSide: const BorderSide(color: AppColors.primaryCyan, width: 2),
+                                      ),
+                                      filled: true,
+                                      fillColor: Colors.white,
+                                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                                    ),
+                                    hint: const Text('Choose a Medical Rep...'),
+                                    items: _medicalReps.map((mr) {
+                                      return DropdownMenuItem(
+                                        value: mr['id'],
+                                        child: Text(
+                                          '${mr['name']} - ${mr['id']}',
+                                          overflow: TextOverflow.ellipsis,
+                                          maxLines: 1,
+                                        ),
+                                      );
+                                    }).toList(),
+                                    onChanged: (value) {
+                                      setState(() {
+                                        _selectedMR = value;
+                                      });
+                                    },
+                                  ),
                               ],
                             ),
                           ),

@@ -288,6 +288,7 @@ class _AppNavigatorState extends State<AppNavigator> {
           date: _coachingDate!,
           mrId: _coachingMrId!,
           mrName: _coachingMrName!,
+          dmId: _userName.isNotEmpty ? 'dm_${_userName.hashCode}' : 'dm_001',
           dmName: _userName,
           onSubmit: (report) {
             // Time Restriction: Cannot submit after 12:00 AM (midnight)

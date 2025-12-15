@@ -6,6 +6,7 @@ class CoachingFormScreen extends StatefulWidget {
   final String date;
   final String mrId;
   final String mrName;
+  final String dmId;
   final String dmName;
   final Function(CoachingReport) onSubmit;
   final VoidCallback onBack;
@@ -15,6 +16,7 @@ class CoachingFormScreen extends StatefulWidget {
     required this.date,
     required this.mrId,
     required this.mrName,
+    required this.dmId,
     required this.dmName,
     required this.onSubmit,
     required this.onBack,
@@ -26,16 +28,7 @@ class CoachingFormScreen extends StatefulWidget {
 
 class _CoachingFormScreenState extends State<CoachingFormScreen> {
   int _currentSection = 0;
-  String? _selectedDM;
-  
   final Map<String, String?> _formData = {};
-  
-  final List<Map<String, String>> _dms = [
-    {'id': '2328', 'name': 'Mahmoud Zidan Menshawy'},
-    {'id': '2329', 'name': 'Mostafa Amin Abd Elrahman'},
-    {'id': '2345', 'name': 'Mohamed Arafa'},
-    {'id': '2357', 'name': 'Mohamed Saeed'},
-  ];
 
   final List<Map<String, String>> _sections = [
     {'title': 'Basic Information', 'key': 'basic'},
@@ -52,6 +45,7 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
     _formData['date'] = widget.date;
     _formData['mrId'] = widget.mrId;
     _formData['mrName'] = widget.mrName;
+    _formData['dmId'] = widget.dmId;
     _formData['dmName'] = widget.dmName;
   }
 
@@ -465,18 +459,10 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
           enabled: false,
         ),
         const SizedBox(height: 24),
-        _buildDropdownField(
+        _buildTextField(
           label: 'District Manager (DM)',
-          value: _selectedDM,
-          items: _dms.map((dm) => '${dm['name']} - ${dm['id']}').toList(),
-          onChanged: (value) {
-            final dm = _dms.firstWhere((d) => '${d['name']} - ${d['id']}' == value);
-            setState(() {
-              _selectedDM = value;
-              _formData['dmId'] = dm['id'];
-              _formData['dmName'] = dm['name'];
-            });
-          },
+          value: '${widget.dmName} - ${widget.dmId}',
+          enabled: false,
         ),
         const SizedBox(height: 24),
         _buildTextField(
@@ -614,57 +600,6 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
             ),
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildDropdownField({
-    required String label,
-    String? value,
-    required List<String> items,
-    required Function(String?) onChanged,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '$label *',
-          style: const TextStyle(
-            color: AppColors.gray700,
-            fontSize: 16,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-        const SizedBox(height: 12),
-        DropdownButtonFormField<String>(
-          value: value,
-          isExpanded: true,
-          decoration: InputDecoration(
-            filled: true,
-            fillColor: Colors.white,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.gray200, width: 2),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.gray200, width: 2),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.primaryCyan, width: 2),
-            ),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-          ),
-          hint: const Text('Select District Manager...'),
-          items: items.map((item) {
-            return DropdownMenuItem(
-              value: item,
-              child: Text(item, overflow: TextOverflow.ellipsis),
-            );
-          }).toList(),
-          onChanged: onChanged,
         ),
       ],
     );

@@ -46,29 +46,38 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     try {
-      // Try Supabase authentication
-      await SupabaseService.signIn(
+      // Supabase authentication (no offline fallback here)
+      final user = await SupabaseService.signIn(
         _usernameController.text.trim(),
         _passwordController.text,
       );
-      
-      // If successful, proceed with login
+
+      // Role validation: تأكيد إن اليوزر داخل من الزر الصح (DM أو GM)
+      final role = (user['role'] ?? '').toString().toLowerCase();
+      final expectedRole = widget.role.toLowerCase(); // 'dm' أو 'gm'
+
+      if (role != expectedRole) {
+        setState(() {
+          _error = expectedRole == 'gm'
+              ? 'This account is not a General Manager'
+              : 'This account is not a District Manager';
+        });
+        return;
+      }
+
+      // If successful, proceed with app login/navigation
       if (mounted) {
-        widget.onLogin(_usernameController.text.trim(), _passwordController.text);
+        widget.onLogin(
+          _usernameController.text.trim(),
+          _passwordController.text,
+        );
       }
     } catch (e) {
-      // If Supabase fails, fallback to local authentication
-      // This allows the app to work even without Supabase configured
       if (mounted) {
         setState(() {
-          _error = e.toString().contains('not found') || 
-                   e.toString().contains('Invalid password')
-              ? 'Invalid username or password'
-              : 'Login failed. Using offline mode.';
+          // للبساطة: أي خطأ من Supabase نعرضه كـ Invalid credentials
+          _error = 'Invalid username or password';
         });
-        
-        // Still allow login for offline mode
-        widget.onLogin(_usernameController.text.trim(), _passwordController.text);
       }
     } finally {
       if (mounted) {

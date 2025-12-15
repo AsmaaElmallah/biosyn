@@ -425,6 +425,59 @@ class SupabaseService {
     }
   }
 
+  /// Update existing user (for GM)
+  static Future<void> updateUser({
+    required String id,
+    String? name,
+    String? username,
+    String? password,
+    String? email,
+    String? role,
+    String? status,
+  }) async {
+    try {
+      if (!isInitialized) {
+        throw Exception('Supabase not initialized');
+      }
+
+      final updates = <String, dynamic>{};
+      if (name != null) updates['name'] = name;
+      if (username != null) updates['username'] = username;
+      if (password != null && password.isNotEmpty) {
+        // In production, hash password here
+        updates['password'] = password;
+      }
+      if (email != null) updates['email'] = email;
+      if (role != null) updates['role'] = role;
+      if (status != null) updates['status'] = status;
+
+      if (updates.isEmpty) return;
+
+      await client!
+          .from('users')
+          .update(updates)
+          .eq('id', id);
+    } catch (e) {
+      throw Exception('Failed to update user: $e');
+    }
+  }
+
+  /// Delete user (for GM)
+  static Future<void> deleteUser(String id) async {
+    try {
+      if (!isInitialized) {
+        throw Exception('Supabase not initialized');
+      }
+
+      await client!
+          .from('users')
+          .delete()
+          .eq('id', id);
+    } catch (e) {
+      throw Exception('Failed to delete user: $e');
+    }
+  }
+
   // ==================== Real-time ====================
 
   /// Listen to reports changes (real-time)

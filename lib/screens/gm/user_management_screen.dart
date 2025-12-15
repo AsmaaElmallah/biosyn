@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:biosyn_report_flutter/theme/colors.dart';
 import 'package:biosyn_report_flutter/widgets/bottom_nav.dart';
+import 'package:biosyn_report_flutter/services/supabase_service.dart';
 
 class User {
   final String id;
@@ -34,18 +35,8 @@ class UserManagementScreen extends StatefulWidget {
 
 class _UserManagementScreenState extends State<UserManagementScreen> {
   String _activeTab = 'dm';
-  final List<User> _dms = [
-    User(id: '2328', name: 'Mahmoud Zidan Menshawy', username: 'mzidan', role: 'dm', status: 'active'),
-    User(id: '2329', name: 'Mostafa Amin Abd Elrahman', username: 'mamin', role: 'dm', status: 'active'),
-    User(id: '2345', name: 'Mohamed Arafa', username: 'marafa', role: 'dm', status: 'active'),
-    User(id: '2357', name: 'Mohamed Saeed', username: 'msaeed', role: 'dm', status: 'active'),
-  ];
-  final List<User> _mrs = [
-    User(id: '2333', name: 'Aya Montaser Saber AbdElhamied', username: 'amontaser', role: 'mr', status: 'active'),
-    User(id: '2318', name: 'Nancy Samy Shady', username: 'nsamy', role: 'mr', status: 'active'),
-    User(id: '2334', name: 'Reman Karem', username: 'rkarem', role: 'mr', status: 'active'),
-    User(id: '2332', name: 'Aml Abdelsattar Mohamad Nossir', username: 'aabdelsattar', role: 'mr', status: 'active'),
-  ];
+  final List<User> _dms = [];
+  final List<User> _mrs = [];
   final _searchController = TextEditingController();
   bool _showModal = false;
   User? _editingUser;
@@ -54,6 +45,8 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   final _nameController = TextEditingController();
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
+  bool _isLoading = false;
+  String? _errorMessage;
 
   List<User> get _currentUsers => _activeTab == 'dm' ? _dms : _mrs;
 
@@ -63,6 +56,56 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
       return user.name.toLowerCase().contains(query) ||
           user.id.contains(query);
     }).toList();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUsers();
+  }
+
+  Future<void> _loadUsers() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final dmsData = await SupabaseService.getAllDMs();
+      final mrsData = await SupabaseService.getAllMRs();
+
+      setState(() {
+        _dms
+          ..clear()
+          ..addAll(dmsData.map((u) => User(
+                id: (u['id'] ?? '').toString(),
+                name: (u['name'] ?? '').toString(),
+                username: (u['username'] ?? '').toString(),
+                role: (u['role'] ?? '').toString(),
+                status: (u['status'] ?? '').toString(),
+              )));
+
+        _mrs
+          ..clear()
+          ..addAll(mrsData.map((u) => User(
+                id: (u['id'] ?? '').toString(),
+                name: (u['name'] ?? '').toString(),
+                username: (u['username'] ?? '').toString(),
+                role: (u['role'] ?? '').toString(),
+                status: (u['status'] ?? '').toString(),
+              )));
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Failed to load users. Please check Supabase connection.';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
   }
 
   void _handleAdd() {
@@ -99,15 +142,18 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () {
-              setState(() {
-                if (_activeTab == 'dm') {
-                  _dms.removeWhere((d) => d.id == userId);
-                } else {
-                  _mrs.removeWhere((m) => m.id == userId);
-                }
-              });
+            onPressed: () async {
               Navigator.pop(context);
+              try {
+                await SupabaseService.deleteUser(userId);
+                await _loadUsers();
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Failed to delete user.')),
+                  );
+                }
+              }
             },
             child: const Text('Delete', style: TextStyle(color: AppColors.error)),
           ),
@@ -116,42 +162,56 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     );
   }
 
-  void _handleSave() {
+  Future<void> _handleSave() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final newUser = User(
-      id: _idController.text,
-      name: _nameController.text,
-      username: _usernameController.text,
-      role: _activeTab,
-      status: 'active',
-    );
-
     setState(() {
-      if (_editingUser != null) {
-        // Update
-        if (_activeTab == 'dm') {
-          final index = _dms.indexWhere((d) => d.id == _editingUser!.id);
-          if (index != -1) _dms[index] = newUser;
-        } else {
-          final index = _mrs.indexWhere((m) => m.id == _editingUser!.id);
-          if (index != -1) _mrs[index] = newUser;
-        }
-      } else {
-        // Add
-        if (_activeTab == 'dm') {
-          _dms.add(newUser);
-        } else {
-          _mrs.add(newUser);
-        }
-      }
-      _showModal = false;
-      _editingUser = null;
-      _idController.clear();
-      _nameController.clear();
-      _usernameController.clear();
-      _passwordController.clear();
+      _errorMessage = null;
     });
+
+    try {
+      if (_editingUser != null) {
+        // Update existing user in Supabase
+        await SupabaseService.updateUser(
+          id: _editingUser!.id,
+          name: _nameController.text.trim(),
+          username: _usernameController.text.trim(),
+          password: _passwordController.text.isNotEmpty ? _passwordController.text : null,
+          role: _activeTab,
+        );
+      } else {
+        // Create new user in Supabase
+        final response = await SupabaseService.signUp(
+          username: _usernameController.text.trim(),
+          password: _passwordController.text,
+          name: _nameController.text.trim(),
+          role: _activeTab,
+        );
+
+        // Use Supabase-generated ID
+        _idController.text = (response['id'] ?? '').toString();
+      }
+
+      await _loadUsers();
+
+      setState(() {
+        _showModal = false;
+        _editingUser = null;
+        _idController.clear();
+        _nameController.clear();
+        _usernameController.clear();
+        _passwordController.clear();
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Failed to save user: ${e.toString()}';
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save user: ${e.toString()}')),
+        );
+      }
+    }
   }
 
   @override
@@ -297,6 +357,17 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                         ),
                       ),
                       const SizedBox(height: 24),
+                      if (_errorMessage != null)
+                        _buildCard(
+                          child: Text(
+                            _errorMessage!,
+                            style: const TextStyle(
+                              color: AppColors.error,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      if (_errorMessage != null) const SizedBox(height: 16),
                       // Search Bar
                       _buildCard(
                         child: TextField(
@@ -324,6 +395,14 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                         ),
                       ),
                       const SizedBox(height: 24),
+                      if (_isLoading)
+                        const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(16),
+                            child: CircularProgressIndicator(),
+                          ),
+                        )
+                      else ...[
                       // Add Button
                       Container(
                         decoration: BoxDecoration(
@@ -518,6 +597,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                                 );
                               }).toList(),
                             ),
+                      ],
                     ],
                   ),
                 ),
