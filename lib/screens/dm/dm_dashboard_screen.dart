@@ -4,14 +4,18 @@ import 'package:biosyn_report_flutter/widgets/bottom_nav.dart';
 import 'package:biosyn_report_flutter/widgets/sync_status_indicator.dart';
 import 'package:biosyn_report_flutter/models/coaching_report.dart';
 import 'package:biosyn_report_flutter/utils/export_utils.dart';
+import 'package:biosyn_report_flutter/services/supabase_service.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
+import 'dart:async';
 
 class DMDashboardScreen extends StatefulWidget {
   final List<CoachingReport> reports;
   final Function(String?) onExport;
   final String activeTab;
   final Function(String) onTabChange;
+  final Future<void> Function()? onRefresh;
+  final String? dmId; // For real-time updates
 
   const DMDashboardScreen({
     super.key,
@@ -19,6 +23,8 @@ class DMDashboardScreen extends StatefulWidget {
     required this.onExport,
     required this.activeTab,
     required this.onTabChange,
+    this.onRefresh,
+    this.dmId,
   });
 
   @override
@@ -27,13 +33,15 @@ class DMDashboardScreen extends StatefulWidget {
 
 class _DMDashboardScreenState extends State<DMDashboardScreen> {
   CoachingReport? _selectedReport;
+  StreamSubscription<List<CoachingReport>>? _reportsSubscription;
+  List<CoachingReport> _currentReports = [];
 
-  Map<String, dynamic> _calculateStats() {
+  Map<String, dynamic> _calculateStatsFromReports(List<CoachingReport> reports) {
     final now = DateTime.now();
     final currentMonth = now.month;
     final currentYear = now.year;
 
-    final thisMonthReports = widget.reports.where((r) {
+    final thisMonthReports = reports.where((r) {
       if (r.date.isEmpty) return false;
       try {
         final reportDate = DateTime.parse(r.date);
@@ -60,7 +68,7 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
     };
   }
 
-  List<Map<String, dynamic>> _calculateMonthlyVisits() {
+  List<Map<String, dynamic>> _calculateMonthlyVisitsFromReports(List<CoachingReport> reports) {
     final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     final now = DateTime.now();
     final monthlyData = <Map<String, dynamic>>[];
@@ -69,7 +77,7 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
       final date = DateTime(now.year, now.month - i, 1);
       final month = months[date.month - 1];
       
-      final visitsCount = widget.reports.where((r) {
+      final visitsCount = reports.where((r) {
         if (r.date.isEmpty) return false;
         try {
           final reportDate = DateTime.parse(r.date);
@@ -85,10 +93,10 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
     return monthlyData;
   }
 
-  List<Map<String, dynamic>> _calculateMRPerformance() {
+  List<Map<String, dynamic>> _calculateMRPerformanceFromReports(List<CoachingReport> reports) {
     final mrStats = <String, Map<String, dynamic>>{};
 
-    for (final report in widget.reports) {
+    for (final report in reports) {
       if (report.mrName.isEmpty) continue;
       
       if (!mrStats.containsKey(report.mrName)) {
@@ -128,12 +136,62 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
     return mrPerformance;
   }
 
-  List<Map<String, dynamic>> _calculateMonthlyMRVisits() {
+  @override
+  void initState() {
+    super.initState();
+    _currentReports = List.from(widget.reports);
+    _startRealtimeUpdates();
+  }
+
+  @override
+  void didUpdateWidget(DMDashboardScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.reports != widget.reports) {
+      setState(() {
+        _currentReports = List.from(widget.reports);
+      });
+    }
+  }
+
+  void _startRealtimeUpdates() {
+    // Only start real-time if dmId is provided and Supabase is initialized
+    if (widget.dmId != null && SupabaseService.isInitialized) {
+      _reportsSubscription = SupabaseService.watchReports(widget.dmId!).listen(
+        (reports) {
+          if (mounted) {
+            setState(() {
+              _currentReports = reports;
+            });
+            // Notify parent to update reports
+            if (widget.onRefresh != null) {
+              widget.onRefresh!();
+            }
+          }
+        },
+        onError: (error) {
+          // Silently handle errors - fallback to widget.reports
+          if (mounted) {
+            setState(() {
+              _currentReports = List.from(widget.reports);
+            });
+          }
+        },
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _reportsSubscription?.cancel();
+    super.dispose();
+  }
+
+  List<Map<String, dynamic>> _calculateMonthlyMRVisitsFromReports(List<CoachingReport> reports) {
     final now = DateTime.now();
     final currentMonth = now.month;
     final currentYear = now.year;
 
-    final thisMonthReports = widget.reports.where((r) {
+    final thisMonthReports = reports.where((r) {
       if (r.date.isEmpty) return false;
       try {
         final reportDate = DateTime.parse(r.date);
@@ -189,10 +247,12 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final stats = _calculateStats();
-    final monthlyVisits = _calculateMonthlyVisits();
-    final mrPerformance = _calculateMRPerformance();
-    final monthlyMRVisits = _calculateMonthlyMRVisits();
+    // Use _currentReports for real-time updates, fallback to widget.reports
+    final reports = _currentReports.isNotEmpty ? _currentReports : widget.reports;
+    final stats = _calculateStatsFromReports(reports);
+    final monthlyVisits = _calculateMonthlyVisitsFromReports(reports);
+    final mrPerformance = _calculateMRPerformanceFromReports(reports);
+    final monthlyMRVisits = _calculateMonthlyMRVisitsFromReports(reports);
 
     return Scaffold(
       backgroundColor: AppColors.gray50,
@@ -242,8 +302,10 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
             ),
             // Content
             Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(24),
+              child: RefreshIndicator(
+                onRefresh: widget.onRefresh ?? () async {},
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(24),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -925,7 +987,7 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                                 ),
                               )
                             : Column(
-                                children: widget.reports.take(5).map((report) {
+                                children: reports.take(5).map((report) {
                                   return Container(
                                     margin: const EdgeInsets.only(bottom: 12),
                                     padding: const EdgeInsets.all(16),
@@ -952,11 +1014,15 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                                               ),
                                             ),
                                             const SizedBox(width: 8),
-                                            Text(
-                                              report.date,
-                                              style: const TextStyle(
-                                                color: AppColors.gray600,
-                                                fontSize: 12,
+                                            Flexible(
+                                              child: Text(
+                                                report.date,
+                                                style: const TextStyle(
+                                                  color: AppColors.gray600,
+                                                  fontSize: 12,
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                                maxLines: 1,
                                               ),
                                             ),
                                           ],
@@ -965,11 +1031,15 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                                         Row(
                                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                           children: [
-                                            Text(
-                                              'ID: ${report.mrId}',
-                                              style: const TextStyle(
-                                                color: AppColors.gray600,
-                                                fontSize: 14,
+                                            Flexible(
+                                              child: Text(
+                                                'ID: ${report.mrId.length > 20 ? "${report.mrId.substring(0, 20)}..." : report.mrId}',
+                                                style: const TextStyle(
+                                                  color: AppColors.gray600,
+                                                  fontSize: 14,
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                                maxLines: 1,
                                               ),
                                             ),
                                             Container(
@@ -1073,10 +1143,13 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                       ),
                     ),
                   ),
+                  // Bottom padding to account for BottomNav
+                  const SizedBox(height: 100),
                 ],
               ),
+                ),
+              ),
             ),
-          ),
               ],
             ),
             // Bottom Navigation
@@ -1131,20 +1204,33 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            label,
-            style: const TextStyle(
-              color: AppColors.gray600,
-              fontSize: 14,
+          Flexible(
+            flex: 2,
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: AppColors.gray600,
+                fontSize: 14,
+              ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 2,
             ),
           ),
-          Text(
-            value,
-            style: const TextStyle(
-              color: AppColors.gray900,
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
+          const SizedBox(width: 8),
+          Flexible(
+            flex: 3,
+            child: Text(
+              value,
+              style: const TextStyle(
+                color: AppColors.gray900,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+              textAlign: TextAlign.end,
+              overflow: TextOverflow.ellipsis,
+              maxLines: 2,
             ),
           ),
         ],
@@ -1208,22 +1294,32 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
+          Flexible(
+            flex: 3,
             child: Text(
               label,
               style: const TextStyle(
                 color: AppColors.gray600,
                 fontSize: 14,
               ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 2,
             ),
           ),
-          Text(
-            value != null ? '$value/6' : 'N/A',
-            style: const TextStyle(
-              color: AppColors.gray900,
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
+          const SizedBox(width: 8),
+          Flexible(
+            flex: 1,
+            child: Text(
+              value != null ? '$value/6' : 'N/A',
+              style: const TextStyle(
+                color: AppColors.gray900,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+              textAlign: TextAlign.end,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
@@ -1243,7 +1339,7 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
             maxWidth: MediaQuery.of(context).size.width * 0.95,
           ),
           child: Container(
-              margin: const EdgeInsets.all(24),
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
@@ -1267,7 +1363,7 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                     gradient: AppColors.primaryGradientHorizontal,
                     borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
                   ),
-                  padding: const EdgeInsets.all(24),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
                   child: Column(
                     children: [
                       const Text(
@@ -1277,6 +1373,7 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
                         ),
+                        textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 8),
                       Text(
@@ -1287,6 +1384,7 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                         ),
                         overflow: TextOverflow.ellipsis,
                         maxLines: 1,
+                        textAlign: TextAlign.center,
                       ),
                     ],
                   ),
@@ -1294,7 +1392,7 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                 // Modal Content
                 Flexible(
                   child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(24),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
@@ -1469,7 +1567,7 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                 ),
                 // Modal Footer
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                   decoration: BoxDecoration(
                     border: Border(
                       top: BorderSide(color: AppColors.gray200),
@@ -1548,19 +1646,23 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                                 }
                               },
                               borderRadius: BorderRadius.circular(12),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
                                 child: const Row(
                                   mainAxisAlignment: MainAxisAlignment.center,
+                                  mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(Icons.download, color: Colors.white, size: 20),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      'Export Report',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w500,
+                                    Icon(Icons.download, color: Colors.white, size: 18),
+                                    SizedBox(width: 6),
+                                    Flexible(
+                                      child: Text(
+                                        'Export',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
                                   ],

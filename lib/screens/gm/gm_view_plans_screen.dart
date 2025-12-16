@@ -898,11 +898,14 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
             children: [
               Icon(icon, color: color, size: 20),
               const SizedBox(width: 8),
-              Text(
-                label,
-                style: const TextStyle(
-                  color: AppColors.gray600,
-                  fontSize: 12,
+              Flexible(
+                child: Text(
+                  label,
+                  style: const TextStyle(
+                    color: AppColors.gray600,
+                    fontSize: 12,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],

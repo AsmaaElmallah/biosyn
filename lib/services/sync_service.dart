@@ -180,10 +180,17 @@ class SyncService {
     Map<String, dynamic> localData,
   ) async {
     try {
-      // For now, we assume conflict if sync fails with specific error
-      // In a real implementation, you would check Supabase for existing record
-      // and compare timestamps
-      return false; // Simplified - can be enhanced
+      if (!SupabaseService.isInitialized) return false;
+      
+      // Check if record exists in Supabase
+      if (tableName == 'reports') {
+        final reports = await SupabaseService.getReports(localData['dm_id'] as String);
+        return reports.any((r) => '${r.mrId}_${r.date}' == recordId);
+      } else if (tableName == 'plans') {
+        final plans = await SupabaseService.getPlans(localData['dm_id'] as String);
+        return plans.any((p) => p['id'] == recordId);
+      }
+      return false;
     } catch (e) {
       return false;
     }
@@ -197,10 +204,43 @@ class SyncService {
   ) async {
     switch (_conflictStrategy) {
       case ConflictStrategy.lastWriteWins:
-        // Compare timestamps - use most recent
-        // In real implementation, fetch remote timestamp and compare
-        // For now, assume local is newer if it exists
-        return true; // Proceed with local version
+        // Fetch remote data and compare timestamps
+        try {
+          if (!SupabaseService.isInitialized) return true;
+          
+          Map<String, dynamic>? remoteData;
+          if (tableName == 'reports') {
+            final reports = await SupabaseService.getReports(localData['dm_id'] as String);
+            final reportId = '${localData['mr_id']}_${localData['date']}';
+            final remoteReport = reports.firstWhere(
+              (r) => '${r.mrId}_${r.date}' == reportId,
+              orElse: () => throw Exception('Not found'),
+            );
+            // Convert to map for comparison
+            remoteData = {
+              'updated_at': remoteReport.date, // Use date as timestamp proxy
+            };
+          } else if (tableName == 'plans') {
+            final plans = await SupabaseService.getPlans(localData['dm_id'] as String);
+            remoteData = plans.firstWhere(
+              (p) => p['id'] == localData['id'],
+              orElse: () => throw Exception('Not found'),
+            );
+          }
+          
+          if (remoteData != null) {
+            // Compare timestamps
+            final localTime = DateTime.tryParse(localData['updated_at'] as String? ?? '') ?? DateTime.now();
+            final remoteTime = DateTime.tryParse(remoteData['updated_at']?.toString() ?? '') ?? DateTime.now();
+            
+            // Use most recent version
+            return localTime.isAfter(remoteTime);
+          }
+        } catch (e) {
+          // If we can't fetch remote, proceed with local
+          return true;
+        }
+        return true; // Default: proceed with local
       
       case ConflictStrategy.localWins:
         // Always use local version

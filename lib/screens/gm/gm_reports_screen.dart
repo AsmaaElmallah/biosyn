@@ -252,7 +252,7 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                                       child: InkWell(
                                         onTap: () async {
                                       try {
-                                        await ExportUtils.exportToCSV(widget.reports, 'all_coaching_reports.csv');
+                                        await ExportUtils.exportAllReportsToText(widget.reports);
                                         if (mounted) {
                                           ScaffoldMessenger.of(context).showSnackBar(
                                             const SnackBar(content: Text('Reports exported successfully!')),
@@ -542,38 +542,41 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                                               ],
                                             ),
                                           ),
-                                          Column(
-                                            crossAxisAlignment: CrossAxisAlignment.end,
-                                            children: [
-                                              Container(
-                                                padding: const EdgeInsets.symmetric(
-                                                  horizontal: 12,
-                                                  vertical: 6,
+                                          Flexible(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.end,
+                                              children: [
+                                                Container(
+                                                  padding: const EdgeInsets.symmetric(
+                                                    horizontal: 12,
+                                                    vertical: 6,
+                                                  ),
+                                                  decoration: BoxDecoration(
+                                                    gradient: AppColors.primaryGradientHorizontal,
+                                                    borderRadius: BorderRadius.circular(20),
+                                                  ),
+                                                  child: Text(
+                                                    'Score: ${_calculateAvgScore(report).toStringAsFixed(2)}',
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 12,
+                                                      fontWeight: FontWeight.w500,
+                                                    ),
+                                                  ),
                                                 ),
-                                                decoration: BoxDecoration(
-                                                  gradient: AppColors.primaryGradientHorizontal,
-                                                  borderRadius: BorderRadius.circular(20),
-                                                ),
-                                                child: Text(
-                                                  'Score: ${_calculateAvgScore(report).toStringAsFixed(2)}',
+                                                const SizedBox(height: 4),
+                                                Text(
+                                                  report.mrId.length > 15 
+                                                      ? 'ID: ${report.mrId.substring(0, 15)}...'
+                                                      : 'ID: ${report.mrId}',
                                                   style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 12,
-                                                    fontWeight: FontWeight.w500,
+                                                    color: AppColors.gray600,
+                                                    fontSize: 10,
                                                   ),
                                                   overflow: TextOverflow.ellipsis,
-                                                  maxLines: 1,
                                                 ),
-                                              ),
-                                              const SizedBox(height: 4),
-                                              Text(
-                                                'ID: ${report.mrId}',
-                                                style: const TextStyle(
-                                                  color: AppColors.gray600,
-                                                  fontSize: 12,
-                                                ),
-                                              ),
-                                            ],
+                                              ],
+                                            ),
                                           ),
                                         ],
                                       ),

@@ -240,6 +240,94 @@ Biosyn Coaching App v1.0.0
     await _saveAndShare(content, filename, 'text/plain');
   }
 
+  // Export all reports to readable text format (better for mobile viewing)
+  static Future<void> exportAllReportsToText(List<CoachingReport> reports) async {
+    if (reports.isEmpty) {
+      throw Exception('No reports to export');
+    }
+
+    final now = DateTime.now();
+    final reportDate = DateFormat('yyyy-MM-dd').format(now);
+
+    // Group reports by DM
+    final reportsByDM = <String, List<CoachingReport>>{};
+    for (final report in reports) {
+      final dmKey = report.dmName.isNotEmpty ? report.dmName : 'Unknown DM';
+      reportsByDM.putIfAbsent(dmKey, () => []);
+      reportsByDM[dmKey]!.add(report);
+    }
+
+    final buffer = StringBuffer();
+    buffer.writeln('═══════════════════════════════════════════');
+    buffer.writeln('      BIOSYN PHARMACEUTICALS');
+    buffer.writeln('      ALL COACHING REPORTS');
+    buffer.writeln('═══════════════════════════════════════════');
+    buffer.writeln('');
+    buffer.writeln('📊 Total Reports: ${reports.length}');
+    buffer.writeln('👥 District Managers: ${reportsByDM.length}');
+    buffer.writeln('📅 Export Date: $reportDate');
+    buffer.writeln('');
+
+    for (final entry in reportsByDM.entries) {
+      final dmName = entry.key;
+      final dmReports = entry.value;
+
+      buffer.writeln('───────────────────────────────────────────');
+      buffer.writeln('👤 District Manager: $dmName');
+      buffer.writeln('   Reports: ${dmReports.length}');
+      buffer.writeln('───────────────────────────────────────────');
+      buffer.writeln('');
+
+      for (int i = 0; i < dmReports.length; i++) {
+        final report = dmReports[i];
+        final avgScore = report.getAverageScore().toStringAsFixed(2);
+
+        buffer.writeln('  ${i + 1}. ${report.mrName}');
+        buffer.writeln('     📅 Date: ${report.date}');
+        buffer.writeln('     🆔 MR ID: ${report.mrId}');
+        buffer.writeln('     ⭐ Score: $avgScore / 6.0');
+        buffer.writeln('');
+        buffer.writeln('     Personal Attributes:');
+        buffer.writeln('       • Punctuality: ${report.punctuality ?? "N/A"}');
+        buffer.writeln('       • Dress Code: ${report.dressCode ?? "N/A"}');
+        buffer.writeln('       • Time Management: ${report.timeManagement ?? "N/A"}');
+        buffer.writeln('');
+        buffer.writeln('     Key Scores:');
+        buffer.writeln('       • Opening: ${report.opening ?? "N/A"}/6');
+        buffer.writeln('       • Product Knowledge: ${report.productKnowledge ?? "N/A"}/6');
+        buffer.writeln('       • E-Detailing: ${report.eDetailing ?? "N/A"}/6');
+        buffer.writeln('       • Ask Commitment: ${report.askCommitment ?? "N/A"}/6');
+        buffer.writeln('');
+
+        if (report.strengths != null && report.strengths!.isNotEmpty) {
+          buffer.writeln('     ✅ Strengths:');
+          buffer.writeln('       ${report.strengths}');
+          buffer.writeln('');
+        }
+
+        if (report.improvements != null && report.improvements!.isNotEmpty) {
+          buffer.writeln('     🎯 Areas to Improve:');
+          buffer.writeln('       ${report.improvements}');
+          buffer.writeln('');
+        }
+
+        buffer.writeln('     Filled with MR: ${report.filledWithMR ?? "N/A"}');
+        buffer.writeln('');
+        buffer.writeln('  - - - - - - - - - - - - - - - - - - - - -');
+        buffer.writeln('');
+      }
+    }
+
+    buffer.writeln('');
+    buffer.writeln('═══════════════════════════════════════════');
+    buffer.writeln('Generated: ${DateFormat('yyyy-MM-dd HH:mm:ss').format(now)}');
+    buffer.writeln('Biosyn Coaching App v1.0.0');
+    buffer.writeln('═══════════════════════════════════════════');
+
+    final filename = 'all_coaching_reports_$reportDate.txt';
+    await _saveAndShare(buffer.toString(), filename, 'text/plain');
+  }
+
   // Helper method to save file and share
   static Future<void> _saveAndShare(String content, String filename, String mimeType) async {
     try {

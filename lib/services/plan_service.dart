@@ -2,6 +2,7 @@ import 'package:biosyn_report_flutter/models/plan.dart';
 import 'package:biosyn_report_flutter/services/database_service.dart';
 import 'package:biosyn_report_flutter/services/connectivity_service.dart';
 import 'package:biosyn_report_flutter/services/sync_service.dart';
+import 'package:biosyn_report_flutter/services/supabase_service.dart';
 
 /// Service لإدارة Plans (يستخدم Local Database مع Auto-sync)
 class PlanService {
@@ -55,11 +56,29 @@ class PlanService {
       // Check if online
       final isConnected = await ConnectivityService.isConnected();
       
-      // Save to local database
-      await DatabaseService.savePlan(plan, synced: isConnected);
+      // If online, try to save to Supabase first
+      bool synced = false;
+      if (isConnected && SupabaseService.isInitialized) {
+        try {
+          await SupabaseService.savePlan(
+            dmId: plan.dmId,
+            dmName: plan.dmName,
+            date: plan.date,
+            mrId: plan.mrId,
+            mrName: plan.mrName,
+          );
+          synced = true;
+        } catch (e) {
+          // Supabase save failed, will sync later
+          synced = false;
+        }
+      }
       
-      // If online, try to sync immediately
-      if (isConnected) {
+      // Save to local database
+      await DatabaseService.savePlan(plan, synced: synced);
+      
+      // If not synced and online, try to sync unsynced items
+      if (isConnected && !synced) {
         try {
           await SyncService.syncIfNeeded();
         } catch (e) {

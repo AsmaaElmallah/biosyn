@@ -17,6 +17,9 @@ import 'package:biosyn_report_flutter/services/database_service.dart';
 import 'package:biosyn_report_flutter/services/connectivity_service.dart';
 import 'package:biosyn_report_flutter/services/sync_service.dart';
 import 'package:biosyn_report_flutter/services/auth_service.dart';
+import 'package:biosyn_report_flutter/services/supabase_service.dart';
+import 'dart:async';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:biosyn_report_flutter/config/supabase_config.dart';
 import 'package:flutter/foundation.dart';
@@ -52,6 +55,18 @@ class MyApp extends StatelessWidget {
       title: 'Biosyn Coaching App',
       theme: AppTheme.lightTheme,
       debugShowCheckedModeBanner: false,
+      // Force English locale and LTR direction
+      locale: const Locale('en', 'US'),
+      supportedLocales: const [Locale('en', 'US')],
+      builder: (context, child) {
+        return Directionality(
+          textDirection: TextDirection.ltr,
+          child: MediaQuery(
+            data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
+            child: child!,
+          ),
+        );
+      },
       home: const AppNavigator(),
     );
   }
@@ -68,17 +83,43 @@ class _AppNavigatorState extends State<AppNavigator> {
   String _currentScreen = 'splash';
   String? _selectedRole;
   String _userName = '';
+  String? _userId;
   String _activeTab = 'planning';
   List<CoachingReport> _reports = [];
   String? _coachingDate;
   String? _coachingMrId;
   String? _coachingMrName;
+  StreamSubscription<ConnectivityResult>? _connectivitySubscription;
 
   @override
   void initState() {
     super.initState();
     _loadReports();
     _checkSession();
+    _setupConnectivityListener();
+  }
+
+  void _setupConnectivityListener() {
+    // Listen to connectivity changes and auto-sync when connected
+    _connectivitySubscription = ConnectivityService.connectivityStream.listen(
+      (ConnectivityResult result) {
+        if (result != ConnectivityResult.none) {
+          // Internet connected - trigger sync
+          SyncService.syncIfNeeded().then((success) {
+            if (success && mounted) {
+              // Reload reports after successful sync
+              _loadReports();
+            }
+          });
+        }
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _connectivitySubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _checkSession() async {
@@ -88,8 +129,10 @@ class _AppNavigatorState extends State<AppNavigator> {
       final user = await AuthService.getCurrentUser();
       if (user != null) {
         final userRole = user['role'] as String?;
+        final userId = user['id']?.toString();
         setState(() {
           _userName = user['name'] as String? ?? '';
+          _userId = userId;
           _selectedRole = userRole ?? 'dm';
           if (userRole == 'dm') {
             _currentScreen = 'dm-planning';
@@ -99,24 +142,54 @@ class _AppNavigatorState extends State<AppNavigator> {
             _activeTab = 'dashboard';
           }
         });
+        // Reload reports after session check
+        await _loadReports();
       }
     }
   }
 
   Future<void> _loadReports() async {
     try {
-      final reports = await DatabaseService.getReports();
+      // First, load from local database
+      List<CoachingReport> reports = await DatabaseService.getReports();
+      
+      // If online and user is logged in, fetch from Supabase and merge
+      final isConnected = await ConnectivityService.isConnected();
+      if (isConnected && _userId != null && SupabaseService.isInitialized) {
+        try {
+          // Fetch reports from Supabase for this DM
+          final supabaseReports = await SupabaseService.getReports(_userId!);
+          
+          // Merge: Add Supabase reports that don't exist locally
+          final localReportIds = reports.map((r) => '${r.mrId}_${r.date}').toSet();
+          for (final supabaseReport in supabaseReports) {
+            final reportId = '${supabaseReport.mrId}_${supabaseReport.date}';
+            if (!localReportIds.contains(reportId)) {
+              // Save to local database
+              await DatabaseService.saveReport(supabaseReport, synced: true);
+              reports.add(supabaseReport);
+            }
+          }
+          
+          // Sort by date (newest first)
+          reports.sort((a, b) => b.date.compareTo(a.date));
+        } catch (e) {
+          // Supabase fetch failed, continue with local data
+          debugPrint('Failed to fetch reports from Supabase: $e');
+        }
+      }
+      
       setState(() {
         _reports = reports;
       });
       
-      // Try to sync if online
-      final isConnected = await ConnectivityService.isConnected();
+      // Try to sync unsynced items if online
       if (isConnected) {
         SyncService.syncIfNeeded();
       }
     } catch (e) {
       // Handle error
+      debugPrint('Error loading reports: $e');
     }
   }
 
@@ -125,16 +198,33 @@ class _AppNavigatorState extends State<AppNavigator> {
       // Check if online
       final isConnected = await ConnectivityService.isConnected();
       
+      // If online, try to save to Supabase first
+      bool synced = false;
+      if (isConnected && SupabaseService.isInitialized) {
+        try {
+          await SupabaseService.saveReport(report);
+          synced = true;
+          debugPrint('✅ Report saved to Supabase successfully');
+        } catch (e) {
+          // Supabase save failed, will sync later
+          synced = false;
+          debugPrint('❌ Failed to save report to Supabase: $e');
+          debugPrint('Report will be synced later when connection is stable');
+        }
+      } else {
+        debugPrint('⚠️ Not connected or Supabase not initialized - saving locally only');
+      }
+      
       // Save to local database
-      await DatabaseService.saveReport(report, synced: isConnected);
+      await DatabaseService.saveReport(report, synced: synced);
       
       // Update UI
       setState(() {
         _reports = [..._reports, report];
       });
       
-      // If online, try to sync immediately
-      if (isConnected) {
+      // If not synced and online, try to sync unsynced items
+      if (isConnected && !synced) {
         try {
           await SyncService.syncIfNeeded();
         } catch (e) {
@@ -166,6 +256,7 @@ class _AppNavigatorState extends State<AppNavigator> {
       
       setState(() {
         _userName = user['name'] as String? ?? username;
+        _userId = user['id']?.toString();
         final userRole = user['role'] as String?;
         
         // Determine screen based on role or selected role
@@ -186,11 +277,15 @@ class _AppNavigatorState extends State<AppNavigator> {
           }
         }
       });
+      
+      // After login, reload reports (will fetch from Supabase if online)
+      await _loadReports();
     } catch (e) {
       // Fallback to local authentication if Supabase fails
       // This allows the app to work even without Supabase configured
       setState(() {
         _userName = username;
+        _userId = null; // No user ID for offline mode
         if (_selectedRole == 'dm') {
           _currentScreen = 'dm-planning';
           _activeTab = 'planning';
@@ -251,6 +346,7 @@ class _AppNavigatorState extends State<AppNavigator> {
       _currentScreen = 'welcome';
       _selectedRole = null;
       _userName = '';
+      _userId = null;
       _activeTab = 'planning';
     });
   }
@@ -280,7 +376,7 @@ class _AppNavigatorState extends State<AppNavigator> {
           },
           activeTab: _activeTab,
           onTabChange: _handleTabChange,
-          dmId: _userName.isNotEmpty ? 'dm_${_userName.hashCode}' : 'dm_001',
+          dmId: _userId ?? (_userName.isNotEmpty ? 'dm_${_userName.hashCode}' : 'dm_001'),
           dmName: _userName.isNotEmpty ? _userName : 'District Manager',
         );
       case 'dm-coaching':
@@ -288,9 +384,9 @@ class _AppNavigatorState extends State<AppNavigator> {
           date: _coachingDate!,
           mrId: _coachingMrId!,
           mrName: _coachingMrName!,
-          dmId: _userName.isNotEmpty ? 'dm_${_userName.hashCode}' : 'dm_001',
+          dmId: _userId ?? (_userName.isNotEmpty ? 'dm_${_userName.hashCode}' : 'dm_001'), // Use UUID from Supabase
           dmName: _userName,
-          onSubmit: (report) {
+          onSubmit: (report) async {
             // Time Restriction: Cannot submit after 12:00 AM (midnight)
             final hour = DateTime.now().hour;
             if (hour >= 0 && hour < 6) {
@@ -300,16 +396,20 @@ class _AppNavigatorState extends State<AppNavigator> {
               return;
             }
             
-            _saveReport(report);
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Coaching report submitted successfully!')),
-            );
-            setState(() {
-              _currentScreen = 'dm-planning';
-              _coachingDate = null;
-              _coachingMrId = null;
-              _coachingMrName = null;
-            });
+            await _saveReport(report);
+            // Reload reports to include the new one
+            await _loadReports();
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Coaching report submitted successfully!')),
+              );
+              setState(() {
+                _currentScreen = 'dm-planning';
+                _coachingDate = null;
+                _coachingMrId = null;
+                _coachingMrName = null;
+              });
+            }
           },
           onBack: () {
             setState(() {
@@ -323,6 +423,10 @@ class _AppNavigatorState extends State<AppNavigator> {
       case 'dm-dashboard':
         return DMDashboardScreen(
           reports: _reports,
+          dmId: _userId,
+          onRefresh: () async {
+            await _loadReports();
+          },
           onExport: (reportId) async {
             try {
               if (reportId != null) {
@@ -357,7 +461,7 @@ class _AppNavigatorState extends State<AppNavigator> {
           allReports: _reports,
           onExport: () async {
             try {
-              await ExportUtils.exportToCSV(_reports, 'all_coaching_reports.csv');
+              await ExportUtils.exportAllReportsToText(_reports);
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Reports exported successfully!')),
@@ -393,7 +497,7 @@ class _AppNavigatorState extends State<AppNavigator> {
                 await ExportUtils.exportSingleReportToText(report);
               } else {
                 // Export all reports
-                await ExportUtils.exportToCSV(_reports, 'all_coaching_reports.csv');
+                await ExportUtils.exportAllReportsToText(_reports);
               }
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(

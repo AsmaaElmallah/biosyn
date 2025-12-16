@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:biosyn_report_flutter/models/coaching_report.dart';
+import 'package:flutter/foundation.dart';
 
 class SupabaseService {
   static SupabaseClient? _client;
@@ -26,9 +27,14 @@ class SupabaseService {
       if (!isInitialized) {
         throw Exception('Supabase not initialized');
       }
-      await client!.from('reports').insert({
+      
+      // Prepare data for Supabase
+      // Note: Don't send 'id' - let Supabase generate UUID automatically
+      // Note: dm_id must be UUID from users table, not generated string
+      final reportData = {
+        // 'id' removed - Supabase will auto-generate UUID
         'date': report.date,
-        'dm_id': report.dmId,
+        'dm_id': report.dmId, // This should be UUID from users table
         'dm_name': report.dmName,
         'mr_id': report.mrId,
         'mr_name': report.mrName,
@@ -57,9 +63,26 @@ class SupabaseService {
         'filled_with_mr': report.filledWithMR,
         'average_score': report.getAverageScore(),
         'synced': true,
-      });
+      };
+      
+      // Insert report (Supabase will auto-generate UUID for id)
+      // Log the data being sent for debugging
+      debugPrint('📤 Saving report to Supabase:');
+      debugPrint('   dm_id: ${report.dmId}');
+      debugPrint('   mr_id: ${report.mrId}');
+      debugPrint('   date: ${report.date}');
+      
+      try {
+        final response = await client!.from('reports').insert(reportData).select();
+        debugPrint('✅ Report saved successfully to Supabase');
+        debugPrint('   Response: $response');
+      } catch (e) {
+        debugPrint('❌ Supabase insert error: $e');
+        debugPrint('   Report data: $reportData');
+        rethrow; // Re-throw to be caught by caller
+      }
     } catch (e) {
-      throw Exception('Failed to save report: $e');
+      throw Exception('Failed to save report to Supabase: $e');
     }
   }
 

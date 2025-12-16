@@ -39,6 +39,10 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
     {'title': 'Post Call Analysis', 'key': 'postCall'},
   ];
 
+  // Text controllers for text areas (to prevent RTL issues)
+  late final TextEditingController _strengthsController;
+  late final TextEditingController _improvementsController;
+
   @override
   void initState() {
     super.initState();
@@ -47,6 +51,17 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
     _formData['mrName'] = widget.mrName;
     _formData['dmId'] = widget.dmId;
     _formData['dmName'] = widget.dmName;
+    
+    // Initialize text controllers
+    _strengthsController = TextEditingController();
+    _improvementsController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _strengthsController.dispose();
+    _improvementsController.dispose();
+    super.dispose();
   }
 
   void _updateField(String field, String value) {
@@ -133,8 +148,8 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
       askCommitment: _formData['askCommitment'],
       bridging: _formData['bridging'],
       selfAssessment: _formData['selfAssessment'],
-      strengths: _formData['strengths'],
-      improvements: _formData['improvements'],
+      strengths: _strengthsController.text.isNotEmpty ? _strengthsController.text : _formData['strengths'],
+      improvements: _improvementsController.text.isNotEmpty ? _improvementsController.text : _formData['improvements'],
       filledWithMR: _formData['filledWithMR'],
     );
 
@@ -143,9 +158,11 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.gray50,
-      body: Column(
+    return Directionality(
+      textDirection: TextDirection.ltr,
+      child: Scaffold(
+        backgroundColor: AppColors.gray50,
+        body: Column(
         children: [
           // Sticky Header and Content
           Expanded(
@@ -394,24 +411,20 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
                               padding: const EdgeInsets.symmetric(vertical: 16),
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
-                                mainAxisSize: MainAxisSize.min,
                                 children: [
                                   if (_currentSection == _sections.length - 1)
                                     const Icon(Icons.send, color: Colors.white, size: 20),
                                   if (_currentSection == _sections.length - 1)
                                     const SizedBox(width: 8),
-                                  Flexible(
-                                    child: Text(
-                                      _currentSection < _sections.length - 1
-                                          ? 'Next'
-                                          : 'Submit Report',
-                                      textAlign: TextAlign.center,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
+                                  Text(
+                                    _currentSection < _sections.length - 1
+                                        ? 'Next'
+                                        : 'Submit Report',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w500,
                                     ),
                                   ),
                                 ],
@@ -427,6 +440,7 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
             ),
           ],
         ),
+      ),
     );
   }
 
@@ -580,25 +594,31 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
           ),
         ),
         const SizedBox(height: 12),
-        TextField(
-          enabled: enabled,
-          controller: TextEditingController(text: value),
-          decoration: InputDecoration(
-            filled: true,
-            fillColor: enabled ? Colors.white : AppColors.gray50,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: TextField(
+            enabled: enabled,
+            controller: TextEditingController(text: value),
+            textDirection: TextDirection.ltr,
+            textAlign: TextAlign.left,
+            keyboardType: TextInputType.text,
+            decoration: InputDecoration(
+              filled: true,
+              fillColor: enabled ? Colors.white : AppColors.gray50,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppColors.primaryCyan, width: 2),
+              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
             ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.gray200, width: 2),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.primaryCyan, width: 2),
-            ),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           ),
         ),
       ],
@@ -606,6 +626,9 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
   }
 
   Widget _buildTextAreaField(String field, String label, String placeholder) {
+    // Use the appropriate controller based on field
+    final controller = field == 'strengths' ? _strengthsController : _improvementsController;
+    
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -619,11 +642,15 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
         ),
         const SizedBox(height: 12),
         TextField(
-          controller: TextEditingController(text: _formData[field] ?? ''),
+          controller: controller,
           onChanged: (value) => _updateField(field, value),
           maxLines: 4,
+          textDirection: TextDirection.ltr,
+          textAlign: TextAlign.left,
+          keyboardType: TextInputType.multiline,
           decoration: InputDecoration(
             hintText: placeholder,
+            hintTextDirection: TextDirection.ltr,
             filled: true,
             fillColor: Colors.white,
             border: OutlineInputBorder(
