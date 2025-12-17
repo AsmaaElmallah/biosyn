@@ -560,15 +560,43 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
                                       filled: true,
                                       fillColor: Colors.white,
                                       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                                      prefixIcon: const Icon(Icons.person_search, color: AppColors.primaryCyan),
                                     ),
                                     hint: const Text('Choose a Medical Rep...'),
                                     items: _medicalReps.map((mr) {
                                       return DropdownMenuItem(
                                         value: mr['id'],
-                                        child: Text(
-                                          '${mr['name']} - ${mr['id']}',
-                                          overflow: TextOverflow.ellipsis,
-                                          maxLines: 1,
+                                        child: Row(
+                                          children: [
+                                            Container(
+                                              width: 32,
+                                              height: 32,
+                                              decoration: BoxDecoration(
+                                                color: AppColors.primaryCyan.withOpacity(0.1),
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: Center(
+                                                child: Text(
+                                                  (mr['name'] ?? 'M')[0].toUpperCase(),
+                                                  style: const TextStyle(
+                                                    color: AppColors.primaryBlue,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 12),
+                                            Expanded(
+                                              child: Text(
+                                                mr['name'] ?? 'Unknown',
+                                                style: const TextStyle(
+                                                  fontWeight: FontWeight.w500,
+                                                  fontSize: 15,
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       );
                                     }).toList(),
@@ -583,60 +611,144 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
                           ),
                           if (_selectedMR != null) ...[
                             const SizedBox(height: 24),
-                            // Selected MR Card
+                            // Selected MR Card - Enhanced Design
                             Container(
                               decoration: BoxDecoration(
                                 gradient: AppColors.primaryGradient,
-                                borderRadius: BorderRadius.circular(16),
+                                borderRadius: BorderRadius.circular(20),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: AppColors.primaryBlue.withOpacity(0.3),
-                                    blurRadius: 15,
-                                    offset: const Offset(0, 5),
+                                    color: AppColors.primaryBlue.withOpacity(0.4),
+                                    blurRadius: 20,
+                                    offset: const Offset(0, 8),
                                   ),
                                 ],
                               ),
-                              padding: const EdgeInsets.all(24),
-                              child: Row(
+                              child: Stack(
                                 children: [
-                                  Container(
-                                    width: 64,
-                                    height: 64,
-                                    decoration: BoxDecoration(
-                                      color: Colors.white.withOpacity(0.2),
-                                      shape: BoxShape.circle,
+                                  // Background pattern
+                                  Positioned(
+                                    right: -20,
+                                    top: -20,
+                                    child: Container(
+                                      width: 100,
+                                      height: 100,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: Colors.white.withOpacity(0.1),
+                                      ),
                                     ),
-                                    child: const Icon(Icons.person, color: Colors.white, size: 32),
                                   ),
-                                  const SizedBox(width: 16),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                  Positioned(
+                                    right: 30,
+                                    bottom: -30,
+                                    child: Container(
+                                      width: 60,
+                                      height: 60,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: Colors.white.withOpacity(0.05),
+                                      ),
+                                    ),
+                                  ),
+                                  // Content
+                                  Padding(
+                                    padding: const EdgeInsets.all(20),
+                                    child: Row(
                                       children: [
-                                        const Text(
-                                          'Selected Medical Rep',
-                                          style: TextStyle(
-                                            color: Colors.white70,
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          _medicalReps.firstWhere((m) => m['id'] == _selectedMR)['name']!,
-                                          style: const TextStyle(
+                                        // Avatar with initials
+                                        Container(
+                                          width: 70,
+                                          height: 70,
+                                          decoration: BoxDecoration(
                                             color: Colors.white,
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.bold,
+                                            shape: BoxShape.circle,
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black.withOpacity(0.1),
+                                                blurRadius: 10,
+                                                offset: const Offset(0, 4),
+                                              ),
+                                            ],
                                           ),
-                                          overflow: TextOverflow.ellipsis,
-                                          maxLines: 2,
+                                          child: Center(
+                                            child: Text(
+                                              (_medicalReps.firstWhere((m) => m['id'] == _selectedMR)['name'] ?? 'M')
+                                                  .split(' ')
+                                                  .take(2)
+                                                  .map((e) => e.isNotEmpty ? e[0].toUpperCase() : '')
+                                                  .join(),
+                                              style: const TextStyle(
+                                                color: AppColors.primaryBlue,
+                                                fontSize: 24,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ),
                                         ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          'ID: $_selectedMR',
-                                          style: TextStyle(
-                                            color: Colors.white.withOpacity(0.9),
-                                            fontSize: 14,
+                                        const SizedBox(width: 16),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.white.withOpacity(0.2),
+                                                  borderRadius: BorderRadius.circular(12),
+                                                ),
+                                                child: const Text(
+                                                  '✓ Selected',
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.w500,
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(height: 8),
+                                              Text(
+                                                _medicalReps.firstWhere((m) => m['id'] == _selectedMR)['name']!,
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 18,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                                maxLines: 1,
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Row(
+                                                children: [
+                                                  Icon(Icons.badge, color: Colors.white.withOpacity(0.7), size: 14),
+                                                  const SizedBox(width: 4),
+                                                  Expanded(
+                                                    child: Text(
+                                                      'Medical Representative',
+                                                      style: TextStyle(
+                                                        color: Colors.white.withOpacity(0.8),
+                                                        fontSize: 12,
+                                                      ),
+                                                      overflow: TextOverflow.ellipsis,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        // Checkmark icon
+                                        Container(
+                                          width: 36,
+                                          height: 36,
+                                          decoration: BoxDecoration(
+                                            color: Colors.white.withOpacity(0.2),
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: const Icon(
+                                            Icons.check,
+                                            color: Colors.white,
+                                            size: 20,
                                           ),
                                         ),
                                       ],
