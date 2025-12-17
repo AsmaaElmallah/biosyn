@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:biosyn_report_flutter/theme/colors.dart';
 import 'package:biosyn_report_flutter/widgets/bottom_nav.dart';
+import 'package:biosyn_report_flutter/widgets/app_header.dart';
 import 'package:biosyn_report_flutter/models/coaching_report.dart';
 import 'package:biosyn_report_flutter/utils/export_utils.dart';
 
@@ -111,43 +112,9 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
             child: Column(
               children: [
                 // Header
-                Container(
-                  decoration: const BoxDecoration(
-                    gradient: AppColors.primaryGradient,
-                    borderRadius: BorderRadius.only(
-                      bottomLeft: Radius.circular(24),
-                      bottomRight: Radius.circular(24),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black26,
-                        blurRadius: 10,
-                        offset: Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  padding: const EdgeInsets.fromLTRB(24, 48, 24, 24),
-                  child: Column(
-                    children: [
-                      const Text(
-                        'Coaching Reports',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'View and analyze all reports',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 14,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
+                const AppHeader(
+                  title: 'Coaching Reports',
+                  subtitle: 'View and analyze all reports',
                 ),
                 // Content
                 Expanded(
@@ -453,20 +420,29 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                           ? _buildCard(
                               child: Column(
                                 children: [
-                                  Icon(Icons.search, size: 48, color: AppColors.gray300),
-                                  const SizedBox(height: 12),
+                                  Container(
+                                    width: 80,
+                                    height: 80,
+                                    decoration: BoxDecoration(
+                                      color: AppColors.gray100,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(Icons.description_outlined, size: 40, color: AppColors.gray400),
+                                  ),
+                                  const SizedBox(height: 16),
                                   const Text(
                                     'No reports found',
                                     style: TextStyle(
-                                      color: AppColors.gray600,
-                                      fontSize: 16,
+                                      color: AppColors.gray700,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w600,
                                     ),
                                   ),
                                   const SizedBox(height: 4),
                                   const Text(
                                     'Try adjusting your filters',
                                     style: TextStyle(
-                                      color: AppColors.gray600,
+                                      color: AppColors.gray400,
                                       fontSize: 14,
                                     ),
                                   ),
@@ -475,9 +451,15 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                             )
                           : Column(
                               children: _filteredReports.map((report) {
+                                final avgScore = _calculateAvgScore(report);
+                                final scoreColor = avgScore >= 5 
+                                    ? AppColors.success 
+                                    : avgScore >= 3 
+                                        ? AppColors.warning 
+                                        : AppColors.error;
+                                
                                 return Container(
                                   margin: const EdgeInsets.only(bottom: 12),
-                                  padding: const EdgeInsets.all(16),
                                   decoration: BoxDecoration(
                                     color: Colors.white,
                                     borderRadius: BorderRadius.circular(16),
@@ -490,259 +472,223 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                                     ],
                                   ),
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Row(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  report.mrName,
+                                      // Header with Avatar
+                                      Padding(
+                                        padding: const EdgeInsets.all(16),
+                                        child: Row(
+                                          children: [
+                                            // Avatar
+                                            Container(
+                                              width: 52,
+                                              height: 52,
+                                              decoration: BoxDecoration(
+                                                gradient: const LinearGradient(
+                                                  colors: [Color(0xFF10B981), Color(0xFF059669)],
+                                                ),
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: Center(
+                                                child: Text(
+                                                  report.mrName.split(' ').take(2).map((e) => e.isNotEmpty ? e[0].toUpperCase() : '').join(),
                                                   style: const TextStyle(
-                                                    fontSize: 16,
+                                                    color: Colors.white,
+                                                    fontSize: 18,
                                                     fontWeight: FontWeight.bold,
-                                                    color: AppColors.gray900,
                                                   ),
                                                 ),
-                                                const SizedBox(height: 8),
-                                                Row(
-                                                  children: [
-                                                    const Icon(Icons.person, size: 16, color: AppColors.gray600),
-                                                    const SizedBox(width: 4),
-                                                    Expanded(
-                                                      child: Text(
-                                                        'DM: ${report.dmName}',
+                                              ),
+                                            ),
+                                            const SizedBox(width: 12),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    report.mrName,
+                                                    style: const TextStyle(
+                                                      fontSize: 16,
+                                                      fontWeight: FontWeight.bold,
+                                                      color: AppColors.gray900,
+                                                    ),
+                                                    overflow: TextOverflow.ellipsis,
+                                                    maxLines: 1,
+                                                  ),
+                                                  const SizedBox(height: 4),
+                                                  Row(
+                                                    children: [
+                                                      const Icon(Icons.person_outline, size: 14, color: AppColors.gray400),
+                                                      const SizedBox(width: 4),
+                                                      Expanded(
+                                                        child: Text(
+                                                          'DM: ${report.dmName}',
+                                                          style: const TextStyle(
+                                                            color: AppColors.gray600,
+                                                            fontSize: 12,
+                                                          ),
+                                                          overflow: TextOverflow.ellipsis,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                  const SizedBox(height: 2),
+                                                  Row(
+                                                    children: [
+                                                      const Icon(Icons.calendar_today_outlined, size: 14, color: AppColors.gray400),
+                                                      const SizedBox(width: 4),
+                                                      Text(
+                                                        report.date,
                                                         style: const TextStyle(
                                                           color: AppColors.gray600,
-                                                          fontSize: 14,
+                                                          fontSize: 12,
                                                         ),
-                                                        overflow: TextOverflow.ellipsis,
-                                                        maxLines: 1,
                                                       ),
-                                                    ),
-                                                  ],
-                                                ),
-                                                const SizedBox(height: 4),
-                                                Row(
-                                                  children: [
-                                                    const Icon(Icons.calendar_today, size: 16, color: AppColors.gray600),
-                                                    const SizedBox(width: 4),
-                                                    Text(
-                                                      report.date,
-                                                      style: const TextStyle(
-                                                        color: AppColors.gray600,
-                                                        fontSize: 14,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ],
+                                                    ],
+                                                  ),
+                                                ],
+                                              ),
                                             ),
-                                          ),
-                                          Flexible(
-                                            child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.end,
-                                              children: [
-                                                Container(
-                                                  padding: const EdgeInsets.symmetric(
-                                                    horizontal: 12,
-                                                    vertical: 6,
-                                                  ),
-                                                  decoration: BoxDecoration(
-                                                    gradient: AppColors.primaryGradientHorizontal,
-                                                    borderRadius: BorderRadius.circular(20),
-                                                  ),
-                                                  child: Text(
-                                                    'Score: ${_calculateAvgScore(report).toStringAsFixed(2)}',
-                                                    style: const TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 12,
-                                                      fontWeight: FontWeight.w500,
+                                            // Score Badge
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                              decoration: BoxDecoration(
+                                                color: scoreColor.withOpacity(0.1),
+                                                borderRadius: BorderRadius.circular(12),
+                                              ),
+                                              child: Column(
+                                                children: [
+                                                  Icon(Icons.star, color: scoreColor, size: 16),
+                                                  const SizedBox(height: 2),
+                                                  Text(
+                                                    avgScore.toStringAsFixed(1),
+                                                    style: TextStyle(
+                                                      color: scoreColor,
+                                                      fontSize: 16,
+                                                      fontWeight: FontWeight.bold,
                                                     ),
                                                   ),
-                                                ),
-                                                const SizedBox(height: 4),
-                                                Text(
-                                                  report.mrId.length > 15 
-                                                      ? 'ID: ${report.mrId.substring(0, 15)}...'
-                                                      : 'ID: ${report.mrId}',
-                                                  style: const TextStyle(
-                                                    color: AppColors.gray600,
-                                                    fontSize: 10,
-                                                  ),
-                                                  overflow: TextOverflow.ellipsis,
-                                                ),
-                                              ],
+                                                ],
+                                              ),
                                             ),
-                                          ),
-                                        ],
+                                          ],
+                                        ),
                                       ),
-                                      const SizedBox(height: 12),
-                                      const Divider(),
-                                      const SizedBox(height: 12),
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: Column(
-                                              children: [
-                                                const Text(
-                                                  'Punctuality',
-                                                  style: TextStyle(
-                                                    color: AppColors.gray600,
-                                                    fontSize: 12,
-                                                  ),
-                                                ),
-                                                const SizedBox(height: 4),
-                                                Text(
-                                                  report.punctuality ?? 'N/A',
-                                                  style: TextStyle(
-                                                    color: report.punctuality == 'Yes'
-                                                        ? AppColors.success
-                                                        : AppColors.error,
-                                                    fontSize: 14,
-                                                    fontWeight: FontWeight.w500,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                          Expanded(
-                                            child: Column(
-                                              children: [
-                                                const Text(
-                                                  'Dress Code',
-                                                  style: TextStyle(
-                                                    color: AppColors.gray600,
-                                                    fontSize: 12,
-                                                  ),
-                                                ),
-                                                const SizedBox(height: 4),
-                                                Text(
-                                                  report.dressCode ?? 'N/A',
-                                                  style: TextStyle(
-                                                    color: report.dressCode == 'Yes'
-                                                        ? AppColors.success
-                                                        : AppColors.error,
-                                                    fontSize: 14,
-                                                    fontWeight: FontWeight.w500,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                          Expanded(
-                                            child: Column(
-                                              children: [
-                                                const Text(
-                                                  'Filled w/ MR',
-                                                  style: TextStyle(
-                                                    color: AppColors.gray600,
-                                                    fontSize: 12,
-                                                  ),
-                                                ),
-                                                const SizedBox(height: 4),
-                                                Text(
-                                                  report.filledWithMR ?? 'N/A',
-                                                  style: TextStyle(
-                                                    color: report.filledWithMR == 'Yes'
-                                                        ? AppColors.success
-                                                        : AppColors.error,
-                                                    fontSize: 14,
-                                                    fontWeight: FontWeight.w500,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
+                                      // Quick Stats
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                        decoration: BoxDecoration(
+                                          color: AppColors.gray50,
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            _buildQuickStat('Punctuality', report.punctuality ?? 'N/A', report.punctuality == 'Yes'),
+                                            _buildQuickStat('Dress Code', report.dressCode ?? 'N/A', report.dressCode == 'Yes'),
+                                            _buildQuickStat('With MR', report.filledWithMR ?? 'N/A', report.filledWithMR == 'Yes'),
+                                          ],
+                                        ),
                                       ),
-                                      const SizedBox(height: 12),
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: InkWell(
-                                              onTap: () {
-                                                setState(() {
-                                                  _selectedReport = report;
-                                                });
-                                              },
-                                              child: Container(
-                                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                                decoration: BoxDecoration(
-                                                  color: AppColors.primaryBlue.withOpacity(0.1),
-                                                  borderRadius: BorderRadius.circular(8),
-                                                ),
-                                                child: const Row(
-                                                  mainAxisAlignment: MainAxisAlignment.center,
-                                                  children: [
-                                                    Icon(Icons.visibility, color: AppColors.primaryBlue, size: 16),
-                                                    SizedBox(width: 8),
-                                                    Text(
-                                                      'View Details',
-                                                      style: TextStyle(
-                                                        color: AppColors.primaryBlue,
-                                                        fontSize: 14,
-                                                        fontWeight: FontWeight.w500,
-                                                      ),
+                                      // Action Buttons
+                                      Container(
+                                        decoration: BoxDecoration(
+                                          borderRadius: const BorderRadius.only(
+                                            bottomLeft: Radius.circular(16),
+                                            bottomRight: Radius.circular(16),
+                                          ),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Expanded(
+                                              child: Material(
+                                                color: Colors.transparent,
+                                                child: InkWell(
+                                                  onTap: () {
+                                                    setState(() {
+                                                      _selectedReport = report;
+                                                    });
+                                                  },
+                                                  borderRadius: const BorderRadius.only(
+                                                    bottomLeft: Radius.circular(16),
+                                                  ),
+                                                  child: Container(
+                                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                                    child: const Row(
+                                                      mainAxisAlignment: MainAxisAlignment.center,
+                                                      children: [
+                                                        Icon(Icons.visibility_outlined, color: AppColors.primaryBlue, size: 18),
+                                                        SizedBox(width: 8),
+                                                        Text(
+                                                          'View Details',
+                                                          style: TextStyle(
+                                                            color: AppColors.primaryBlue,
+                                                            fontSize: 14,
+                                                            fontWeight: FontWeight.w600,
+                                                          ),
+                                                        ),
+                                                      ],
                                                     ),
-                                                  ],
+                                                  ),
                                                 ),
                                               ),
                                             ),
-                                          ),
-                                          const SizedBox(width: 12),
-                                          Expanded(
-                                            child: InkWell(
-                                              onTap: () async {
-                                                try {
-                                                  await ExportUtils.exportSingleReportToText(report);
-                                                  if (mounted) {
-                                                    ScaffoldMessenger.of(context).showSnackBar(
-                                                      const SnackBar(content: Text('Report exported successfully!')),
-                                                    );
-                                                  }
-                                                } catch (e) {
-                                                  if (mounted) {
-                                                    ScaffoldMessenger.of(context).showSnackBar(
-                                                      SnackBar(content: Text('Export failed: ${e.toString()}')),
-                                                    );
-                                                  }
-                                                }
-                                              },
-                                              child: Container(
-                                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                                decoration: BoxDecoration(
-                                                  color: AppColors.success.withOpacity(0.1),
-                                                  borderRadius: BorderRadius.circular(8),
-                                                ),
-                                                child: const Row(
-                                                  mainAxisAlignment: MainAxisAlignment.center,
-                                                  children: [
-                                                    Icon(Icons.download, color: AppColors.success, size: 16),
-                                                    SizedBox(width: 8),
-                                                    Text(
-                                                      'Export',
-                                                      style: TextStyle(
-                                                        color: AppColors.success,
-                                                        fontSize: 14,
-                                                        fontWeight: FontWeight.w500,
-                                                      ),
+                                            Container(
+                                              width: 1,
+                                              height: 24,
+                                              color: AppColors.gray200,
+                                            ),
+                                            Expanded(
+                                              child: Material(
+                                                color: Colors.transparent,
+                                                child: InkWell(
+                                                  onTap: () async {
+                                                    try {
+                                                      await ExportUtils.exportSingleReportToText(report);
+                                                      if (mounted) {
+                                                        ScaffoldMessenger.of(context).showSnackBar(
+                                                          const SnackBar(content: Text('Report exported successfully!')),
+                                                        );
+                                                      }
+                                                    } catch (e) {
+                                                      if (mounted) {
+                                                        ScaffoldMessenger.of(context).showSnackBar(
+                                                          SnackBar(content: Text('Export failed: ${e.toString()}')),
+                                                        );
+                                                      }
+                                                    }
+                                                  },
+                                                  borderRadius: const BorderRadius.only(
+                                                    bottomRight: Radius.circular(16),
+                                                  ),
+                                                  child: Container(
+                                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                                    child: const Row(
+                                                      mainAxisAlignment: MainAxisAlignment.center,
+                                                      children: [
+                                                        Icon(Icons.download_outlined, color: AppColors.success, size: 18),
+                                                        SizedBox(width: 8),
+                                                        Text(
+                                                          'Export',
+                                                          style: TextStyle(
+                                                            color: AppColors.success,
+                                                            fontSize: 14,
+                                                            fontWeight: FontWeight.w600,
+                                                          ),
+                                                        ),
+                                                      ],
                                                     ),
-                                                  ],
+                                                  ),
                                                 ),
                                               ),
                                             ),
-                                          ),
-                                        ],
+                                          ],
+                                        ),
                                       ),
                                     ],
                                   ),
                                 );
                               }).toList(),
                             ),
+                      // Bottom padding for navigation
+                      const SizedBox(height: 20),
                       ],
                     ),
                   ),
@@ -1280,6 +1226,38 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
         ],
       ),
       child: child,
+    );
+  }
+
+  Widget _buildQuickStat(String label, String value, bool isPositive) {
+    return Expanded(
+      child: Column(
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              color: AppColors.gray600,
+              fontSize: 11,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: isPositive ? AppColors.success.withOpacity(0.1) : AppColors.error.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              value,
+              style: TextStyle(
+                color: isPositive ? AppColors.success : AppColors.error,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

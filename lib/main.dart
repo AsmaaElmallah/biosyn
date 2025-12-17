@@ -150,34 +150,66 @@ class _AppNavigatorState extends State<AppNavigator> {
 
   Future<void> _loadReports() async {
     try {
+      debugPrint('📊 Loading reports...');
+      debugPrint('   Role: $_selectedRole');
+      debugPrint('   User ID: $_userId');
+      
       // First, load from local database
       List<CoachingReport> reports = await DatabaseService.getReports();
+      debugPrint('   Local reports: ${reports.length}');
       
-      // If online and user is logged in, fetch from Supabase and merge
+      // If online, fetch from Supabase and merge
       final isConnected = await ConnectivityService.isConnected();
-      if (isConnected && _userId != null && SupabaseService.isInitialized) {
+      debugPrint('   Is connected: $isConnected');
+      debugPrint('   Supabase initialized: ${SupabaseService.isInitialized}');
+      
+      if (isConnected && SupabaseService.isInitialized) {
         try {
-          // Fetch reports from Supabase for this DM
-          final supabaseReports = await SupabaseService.getReports(_userId!);
+          List<CoachingReport> supabaseReports;
+          
+          // For GM, fetch ALL reports. For DM, fetch only their reports.
+          if (_selectedRole == 'gm') {
+            debugPrint('   Fetching ALL reports for GM...');
+            supabaseReports = await SupabaseService.getAllReports();
+          } else if (_userId != null) {
+            debugPrint('   Fetching reports for DM: $_userId');
+            supabaseReports = await SupabaseService.getReports(_userId!);
+          } else {
+            debugPrint('   No user ID, skipping Supabase fetch');
+            supabaseReports = [];
+          }
+          
+          debugPrint('   Supabase reports: ${supabaseReports.length}');
           
           // Merge: Add Supabase reports that don't exist locally
           final localReportIds = reports.map((r) => '${r.mrId}_${r.date}').toSet();
+          int newReportsAdded = 0;
           for (final supabaseReport in supabaseReports) {
             final reportId = '${supabaseReport.mrId}_${supabaseReport.date}';
             if (!localReportIds.contains(reportId)) {
               // Save to local database
               await DatabaseService.saveReport(supabaseReport, synced: true);
               reports.add(supabaseReport);
+              newReportsAdded++;
             }
+          }
+          debugPrint('   New reports added from Supabase: $newReportsAdded');
+          
+          // If GM and local is empty but Supabase has data, use Supabase data directly
+          if (_selectedRole == 'gm' && reports.isEmpty && supabaseReports.isNotEmpty) {
+            reports = supabaseReports;
+            debugPrint('   Using Supabase reports directly for GM');
           }
           
           // Sort by date (newest first)
           reports.sort((a, b) => b.date.compareTo(a.date));
         } catch (e) {
           // Supabase fetch failed, continue with local data
-          debugPrint('Failed to fetch reports from Supabase: $e');
+          debugPrint('❌ Failed to fetch reports from Supabase: $e');
         }
       }
+      
+      debugPrint('   Total reports loaded: ${reports.length}');
       
       setState(() {
         _reports = reports;
@@ -189,7 +221,7 @@ class _AppNavigatorState extends State<AppNavigator> {
       }
     } catch (e) {
       // Handle error
-      debugPrint('Error loading reports: $e');
+      debugPrint('❌ Error loading reports: $e');
     }
   }
 

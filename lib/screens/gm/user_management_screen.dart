@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:biosyn_report_flutter/theme/colors.dart';
 import 'package:biosyn_report_flutter/widgets/bottom_nav.dart';
+import 'package:biosyn_report_flutter/widgets/app_header.dart';
 import 'package:biosyn_report_flutter/services/supabase_service.dart';
 
 class User {
@@ -234,42 +235,9 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
             child: Column(
               children: [
               // Header
-              Container(
-                decoration: const BoxDecoration(
-                  gradient: AppColors.primaryGradient,
-                  borderRadius: BorderRadius.only(
-                    bottomLeft: Radius.circular(24),
-                    bottomRight: Radius.circular(24),
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black26,
-                      blurRadius: 10,
-                      offset: Offset(0, 4),
-                    ),
-                  ],
-                ),
-                padding: const EdgeInsets.fromLTRB(24, 48, 24, 24),
-                child: Column(
-                  children: [
-                    const Text(
-                      'User Management',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Manage District Managers and Medical Reps',
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
-                ),
+              const AppHeader(
+                title: 'User Management',
+                subtitle: 'Manage District Managers and Medical Reps',
               ),
               // Content
               Expanded(
@@ -448,13 +416,32 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                           ? _buildCard(
                               child: Column(
                                 children: [
-                                  Icon(Icons.people, size: 48, color: AppColors.gray300),
-                                  const SizedBox(height: 12),
+                                  Container(
+                                    width: 80,
+                                    height: 80,
+                                    decoration: BoxDecoration(
+                                      color: AppColors.gray100,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(Icons.people_outline, size: 40, color: AppColors.gray400),
+                                  ),
+                                  const SizedBox(height: 16),
                                   const Text(
                                     'No users found',
                                     style: TextStyle(
-                                      color: AppColors.gray600,
-                                      fontSize: 16,
+                                      color: AppColors.gray700,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _activeTab == 'dm' 
+                                        ? 'Add your first District Manager'
+                                        : 'Add your first Medical Rep',
+                                    style: const TextStyle(
+                                      color: AppColors.gray400,
+                                      fontSize: 14,
                                     ),
                                   ),
                                 ],
@@ -464,7 +451,6 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                               children: _filteredUsers.map((user) {
                                 return Container(
                                   margin: const EdgeInsets.only(bottom: 12),
-                                  padding: const EdgeInsets.all(16),
                                   decoration: BoxDecoration(
                                     color: Colors.white,
                                     borderRadius: BorderRadius.circular(16),
@@ -477,126 +463,203 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                                     ],
                                   ),
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  user.name,
+                                      // User Info Section
+                                      Padding(
+                                        padding: const EdgeInsets.all(16),
+                                        child: Row(
+                                          children: [
+                                            // Avatar
+                                            Container(
+                                              width: 56,
+                                              height: 56,
+                                              decoration: BoxDecoration(
+                                                gradient: _activeTab == 'dm' 
+                                                    ? AppColors.primaryGradient
+                                                    : const LinearGradient(
+                                                        colors: [Color(0xFF10B981), Color(0xFF059669)],
+                                                      ),
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: Center(
+                                                child: Text(
+                                                  user.name.isNotEmpty 
+                                                      ? user.name.split(' ').take(2).map((e) => e.isNotEmpty ? e[0].toUpperCase() : '').join()
+                                                      : 'U',
                                                   style: const TextStyle(
-                                                    fontSize: 16,
+                                                    color: Colors.white,
+                                                    fontSize: 20,
                                                     fontWeight: FontWeight.bold,
-                                                    color: AppColors.gray900,
                                                   ),
-                                                  overflow: TextOverflow.ellipsis,
-                                                  maxLines: 2,
                                                 ),
-                                                const SizedBox(height: 4),
-                                                Text(
-                                                  '@${user.username} • ID: ${user.id}',
-                                                  style: const TextStyle(
-                                                    color: AppColors.gray600,
-                                                    fontSize: 14,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 16),
+                                            // User Details
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    user.name,
+                                                    style: const TextStyle(
+                                                      fontSize: 16,
+                                                      fontWeight: FontWeight.bold,
+                                                      color: AppColors.gray900,
+                                                    ),
+                                                    overflow: TextOverflow.ellipsis,
+                                                    maxLines: 1,
                                                   ),
-                                                  overflow: TextOverflow.ellipsis,
-                                                  maxLines: 1,
-                                                ),
-                                              ],
+                                                  const SizedBox(height: 4),
+                                                  Row(
+                                                    children: [
+                                                      Icon(
+                                                        Icons.person_outline,
+                                                        size: 14,
+                                                        color: AppColors.gray400,
+                                                      ),
+                                                      const SizedBox(width: 4),
+                                                      Expanded(
+                                                        child: Text(
+                                                          '@${user.username}',
+                                                          style: const TextStyle(
+                                                            color: AppColors.gray600,
+                                                            fontSize: 13,
+                                                          ),
+                                                          overflow: TextOverflow.ellipsis,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ],
+                                              ),
                                             ),
-                                          ),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 6,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: user.status == 'active'
-                                                  ? AppColors.success.withOpacity(0.1)
-                                                  : AppColors.gray300.withOpacity(0.1),
-                                              borderRadius: BorderRadius.circular(20),
-                                            ),
-                                            child: Text(
-                                              user.status,
-                                              style: TextStyle(
+                                            // Status Badge
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(
+                                                horizontal: 10,
+                                                vertical: 5,
+                                              ),
+                                              decoration: BoxDecoration(
                                                 color: user.status == 'active'
-                                                    ? AppColors.success
-                                                    : AppColors.gray600,
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.w500,
+                                                    ? AppColors.success.withOpacity(0.1)
+                                                    : AppColors.gray200,
+                                                borderRadius: BorderRadius.circular(20),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Container(
+                                                    width: 6,
+                                                    height: 6,
+                                                    decoration: BoxDecoration(
+                                                      color: user.status == 'active'
+                                                          ? AppColors.success
+                                                          : AppColors.gray400,
+                                                      shape: BoxShape.circle,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 4),
+                                                  Text(
+                                                    user.status == 'active' ? 'Active' : 'Inactive',
+                                                    style: TextStyle(
+                                                      color: user.status == 'active'
+                                                          ? AppColors.success
+                                                          : AppColors.gray600,
+                                                      fontSize: 11,
+                                                      fontWeight: FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
                                             ),
-                                          ),
-                                        ],
+                                          ],
+                                        ),
                                       ),
-                                      const SizedBox(height: 12),
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: InkWell(
-                                              onTap: () => _handleEdit(user),
-                                              child: Container(
-                                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                                decoration: BoxDecoration(
-                                                  color: AppColors.primaryBlue.withOpacity(0.1),
-                                                  borderRadius: BorderRadius.circular(8),
-                                                ),
-                                                child: const Row(
-                                                  mainAxisAlignment: MainAxisAlignment.center,
-                                                  children: [
-                                                    Icon(Icons.edit, color: AppColors.primaryBlue, size: 16),
-                                                    SizedBox(width: 8),
-                                                    Text(
-                                                      'Edit',
-                                                      style: TextStyle(
-                                                        color: AppColors.primaryBlue,
-                                                        fontSize: 14,
-                                                        fontWeight: FontWeight.w500,
-                                                      ),
+                                      // Action Buttons
+                                      Container(
+                                        decoration: BoxDecoration(
+                                          color: AppColors.gray50,
+                                          borderRadius: const BorderRadius.only(
+                                            bottomLeft: Radius.circular(16),
+                                            bottomRight: Radius.circular(16),
+                                          ),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Expanded(
+                                              child: Material(
+                                                color: Colors.transparent,
+                                                child: InkWell(
+                                                  onTap: () => _handleEdit(user),
+                                                  borderRadius: const BorderRadius.only(
+                                                    bottomLeft: Radius.circular(16),
+                                                  ),
+                                                  child: Container(
+                                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                                    child: const Row(
+                                                      mainAxisAlignment: MainAxisAlignment.center,
+                                                      children: [
+                                                        Icon(Icons.edit_outlined, color: AppColors.primaryBlue, size: 18),
+                                                        SizedBox(width: 8),
+                                                        Text(
+                                                          'Edit',
+                                                          style: TextStyle(
+                                                            color: AppColors.primaryBlue,
+                                                            fontSize: 14,
+                                                            fontWeight: FontWeight.w600,
+                                                          ),
+                                                        ),
+                                                      ],
                                                     ),
-                                                  ],
+                                                  ),
                                                 ),
                                               ),
                                             ),
-                                          ),
-                                          const SizedBox(width: 12),
-                                          Expanded(
-                                            child: InkWell(
-                                              onTap: () => _handleDelete(user.id),
-                                              child: Container(
-                                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                                decoration: BoxDecoration(
-                                                  color: AppColors.error.withOpacity(0.1),
-                                                  borderRadius: BorderRadius.circular(8),
-                                                ),
-                                                child: const Row(
-                                                  mainAxisAlignment: MainAxisAlignment.center,
-                                                  children: [
-                                                    Icon(Icons.delete, color: AppColors.error, size: 16),
-                                                    SizedBox(width: 8),
-                                                    Text(
-                                                      'Delete',
-                                                      style: TextStyle(
-                                                        color: AppColors.error,
-                                                        fontSize: 14,
-                                                        fontWeight: FontWeight.w500,
-                                                      ),
+                                            Container(
+                                              width: 1,
+                                              height: 24,
+                                              color: AppColors.gray200,
+                                            ),
+                                            Expanded(
+                                              child: Material(
+                                                color: Colors.transparent,
+                                                child: InkWell(
+                                                  onTap: () => _handleDelete(user.id),
+                                                  borderRadius: const BorderRadius.only(
+                                                    bottomRight: Radius.circular(16),
+                                                  ),
+                                                  child: Container(
+                                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                                    child: const Row(
+                                                      mainAxisAlignment: MainAxisAlignment.center,
+                                                      children: [
+                                                        Icon(Icons.delete_outline, color: AppColors.error, size: 18),
+                                                        SizedBox(width: 8),
+                                                        Text(
+                                                          'Delete',
+                                                          style: TextStyle(
+                                                            color: AppColors.error,
+                                                            fontSize: 14,
+                                                            fontWeight: FontWeight.w600,
+                                                          ),
+                                                        ),
+                                                      ],
                                                     ),
-                                                  ],
+                                                  ),
                                                 ),
                                               ),
                                             ),
-                                          ),
-                                        ],
+                                          ],
+                                        ),
                                       ),
                                     ],
                                   ),
                                 );
                               }).toList(),
                             ),
+                      // Bottom padding for navigation
+                      const SizedBox(height: 20),
                       ],
                     ],
                   ),

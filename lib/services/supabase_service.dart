@@ -109,18 +109,23 @@ class SupabaseService {
   /// Get all reports (for GM)
   static Future<List<CoachingReport>> getAllReports() async {
     try {
+      debugPrint('📊 SupabaseService.getAllReports() called');
       if (!isInitialized) {
+        debugPrint('   ❌ Supabase not initialized');
         return [];
       }
+      debugPrint('   Fetching from reports table...');
       final response = await client!
           .from('reports')
           .select()
           .order('date', ascending: false);
 
-      return (response as List)
+      debugPrint('   ✅ Got ${(response as List).length} reports from Supabase');
+      return response
           .map((json) => CoachingReport.fromSupabaseJson(json))
           .toList();
     } catch (e) {
+      debugPrint('   ❌ Error: $e');
       throw Exception('Failed to get all reports: $e');
     }
   }
@@ -266,16 +271,21 @@ class SupabaseService {
   /// Get all plans (for GM - view only)
   static Future<List<Map<String, dynamic>>> getAllPlans() async {
     try {
+      debugPrint('📅 SupabaseService.getAllPlans() called');
       if (!isInitialized) {
+        debugPrint('   ❌ Supabase not initialized');
         return [];
       }
+      debugPrint('   Fetching from plans table...');
       final response = await client!
           .from('plans')
           .select()
           .order('date', ascending: true);
 
+      debugPrint('   ✅ Got ${(response as List).length} plans from Supabase');
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
+      debugPrint('   ❌ Error: $e');
       throw Exception('Failed to get all plans: $e');
     }
   }
@@ -285,25 +295,34 @@ class SupabaseService {
   /// Sign in with username and password
   static Future<Map<String, dynamic>> signIn(String username, String password) async {
     try {
+      debugPrint('🔐 SupabaseService.signIn() called');
+      debugPrint('   Username: $username');
+      
       // Option 1: Use Supabase Auth (if using email-based auth)
       // For now, we'll use custom authentication with users table
       final user = await getUserByUsername(username);
       
       if (user == null) {
+        debugPrint('   ❌ User not found');
         throw Exception('User not found');
       }
+      
+      debugPrint('   ✅ User found: ${user['name']} (${user['role']})');
 
       // In production, use password hashing (bcrypt)
       // For now, simple comparison (NOT SECURE - for development only)
       if (user['password'] != password && user['password_hash'] != password) {
+        debugPrint('   ❌ Invalid password');
         throw Exception('Invalid password');
       }
 
       // Check if user is active
       if (user['status'] != 'active') {
+        debugPrint('   ❌ User account is not active');
         throw Exception('User account is not active');
       }
 
+      debugPrint('   ✅ Login successful! User ID: ${user['id']}');
       return {
         'id': user['id'],
         'username': user['username'],
@@ -312,6 +331,7 @@ class SupabaseService {
         'email': user['email'],
       };
     } catch (e) {
+      debugPrint('   ❌ Login failed: $e');
       throw Exception('Login failed: ${e.toString()}');
     }
   }
@@ -413,9 +433,12 @@ class SupabaseService {
   /// Get all DMs (for GM)
   static Future<List<Map<String, dynamic>>> getAllDMs() async {
     try {
+      debugPrint('👥 SupabaseService.getAllDMs() called');
       if (!isInitialized) {
+        debugPrint('   ❌ Supabase not initialized');
         return [];
       }
+      debugPrint('   Fetching DMs from users table...');
       final response = await client!
           .from('users')
           .select()
@@ -423,8 +446,10 @@ class SupabaseService {
           .eq('status', 'active')
           .order('name', ascending: true);
 
+      debugPrint('   ✅ Got ${(response as List).length} DMs from Supabase');
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
+      debugPrint('   ❌ Error: $e');
       throw Exception('Failed to get DMs: $e');
     }
   }
@@ -432,9 +457,12 @@ class SupabaseService {
   /// Get all MRs (for GM)
   static Future<List<Map<String, dynamic>>> getAllMRs() async {
     try {
+      debugPrint('👥 SupabaseService.getAllMRs() called');
       if (!isInitialized) {
+        debugPrint('   ❌ Supabase not initialized');
         return [];
       }
+      debugPrint('   Fetching MRs from users table...');
       final response = await client!
           .from('users')
           .select()
@@ -442,8 +470,10 @@ class SupabaseService {
           .eq('status', 'active')
           .order('name', ascending: true);
 
+      debugPrint('   ✅ Got ${(response as List).length} MRs from Supabase');
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
+      debugPrint('   ❌ Error: $e');
       throw Exception('Failed to get MRs: $e');
     }
   }

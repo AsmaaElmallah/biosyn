@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:biosyn_report_flutter/theme/colors.dart';
 import 'package:biosyn_report_flutter/widgets/bottom_nav.dart';
+import 'package:biosyn_report_flutter/widgets/app_header.dart';
 import 'package:intl/intl.dart';
-import 'package:table_calendar/table_calendar.dart';
-import 'package:biosyn_report_flutter/models/plan.dart';
-import 'package:biosyn_report_flutter/services/plan_service.dart';
+import 'package:biosyn_report_flutter/services/supabase_service.dart';
+import 'package:biosyn_report_flutter/services/connectivity_service.dart';
 
 class GMViewPlansScreen extends StatefulWidget {
   final String activeTab;
@@ -21,14 +22,14 @@ class GMViewPlansScreen extends StatefulWidget {
 }
 
 class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
-  DateTime _focusedDay = DateTime.now();
-  DateTime _selectedDay = DateTime.now();
   String? _selectedDMId;
-  List<Plan> _allPlans = [];
-  List<String> _dmIds = [];
-  Map<String, String> _dmNames = {};
-  Map<String, Color> _dmColors = {};
+  List<Map<String, dynamic>> _allPlans = [];
+  List<Map<String, dynamic>> _allDMs = [];
   bool _isLoading = true;
+  String? _errorMessage;
+  
+  // Current month for filtering
+  DateTime _selectedMonth = DateTime.now();
 
   // Colors for different DMs
   final List<Color> _colorPalette = [
@@ -47,103 +48,131 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
   @override
   void initState() {
     super.initState();
-    _loadPlans();
+    _loadData();
   }
 
-  Future<void> _loadPlans() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadData() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+    
     try {
-      final allPlans = await PlanService.getPlans();
+      final isConnected = await ConnectivityService.isConnected();
+      debugPrint('📅 GMViewPlansScreen._loadData()');
+      debugPrint('   Is connected: $isConnected');
+      debugPrint('   Supabase initialized: ${SupabaseService.isInitialized}');
       
-      // Extract unique DM IDs and names
-      final dmSet = <String>{};
-      final dmNamesMap = <String, String>{};
+      if (!isConnected) {
+        setState(() {
+          _errorMessage = 'No internet connection. Please check your network.';
+          _isLoading = false;
+        });
+        return;
+      }
       
-      for (final plan in allPlans) {
-        if (plan.dmId.isNotEmpty) {
-          dmSet.add(plan.dmId);
-          dmNamesMap[plan.dmId] = plan.dmName;
-        }
+      if (!SupabaseService.isInitialized) {
+        setState(() {
+          _errorMessage = 'Supabase is not initialized.';
+          _isLoading = false;
+        });
+        return;
       }
-
-      // Assign colors to DMs
-      final dmColorsMap = <String, Color>{};
-      int colorIndex = 0;
-      for (final dmId in dmSet) {
-        dmColorsMap[dmId] = _colorPalette[colorIndex % _colorPalette.length];
-        colorIndex++;
-      }
-
+      
+      // Fetch DMs and Plans from Supabase
+      final dms = await SupabaseService.getAllDMs();
+      final plans = await SupabaseService.getAllPlans();
+      
+      debugPrint('   ✅ Loaded ${dms.length} DMs');
+      debugPrint('   ✅ Loaded ${plans.length} Plans');
+      
       setState(() {
-        _allPlans = allPlans;
-        _dmIds = dmSet.toList()..sort();
-        _dmNames = dmNamesMap;
-        _dmColors = dmColorsMap;
+        _allDMs = dms;
+        _allPlans = plans;
         _isLoading = false;
       });
     } catch (e) {
-      setState(() => _isLoading = false);
+      debugPrint('   ❌ Error: $e');
+      setState(() {
+        _errorMessage = 'Failed to load data: ${e.toString()}';
+        _isLoading = false;
+      });
     }
   }
 
-  List<Plan> _getFilteredPlans() {
-    if (_selectedDMId == null) {
-      return _allPlans;
-    }
-    return _allPlans.where((plan) => plan.dmId == _selectedDMId).toList();
+  Color _getColorForDM(int index) {
+    return _colorPalette[index % _colorPalette.length];
   }
 
-  List<Plan> _getPlansForDay(DateTime day) {
+  List<Map<String, dynamic>> _getFilteredPlans() {
+    var plans = _allPlans;
+    
+    // Filter by selected DM
+    if (_selectedDMId != null) {
+      plans = plans.where((p) => p['dm_id'] == _selectedDMId).toList();
+    }
+    
+    // Filter by selected month
+    final monthStart = DateTime(_selectedMonth.year, _selectedMonth.month, 1);
+    final monthEnd = DateTime(_selectedMonth.year, _selectedMonth.month + 1, 0);
+    
+    plans = plans.where((p) {
+      try {
+        final planDate = DateTime.parse(p['date']);
+        return planDate.isAfter(monthStart.subtract(const Duration(days: 1))) &&
+               planDate.isBefore(monthEnd.add(const Duration(days: 1)));
+      } catch (e) {
+        return false;
+      }
+    }).toList();
+    
+    // Sort by date
+    plans.sort((a, b) {
+      try {
+        return DateTime.parse(a['date']).compareTo(DateTime.parse(b['date']));
+      } catch (e) {
+        return 0;
+      }
+    });
+    
+    return plans;
+  }
+
+  // Group plans by DM
+  Map<String, List<Map<String, dynamic>>> _groupPlansByDM() {
     final filteredPlans = _getFilteredPlans();
-    final dateStr = DateFormat('yyyy-MM-dd').format(day);
-    return filteredPlans.where((plan) => plan.date == dateStr).toList();
-  }
-
-  Color _getColorForPlan(Plan plan) {
-    return _dmColors[plan.dmId] ?? AppColors.primaryBlue;
-  }
-
-  Map<String, dynamic> _calculateStatistics() {
-    final stats = <String, Map<String, dynamic>>{};
+    final grouped = <String, List<Map<String, dynamic>>>{};
     
-    for (final plan in _allPlans) {
-      if (!stats.containsKey(plan.dmId)) {
-        stats[plan.dmId] = {
-          'dmName': plan.dmName,
-          'total': 0,
-          'pending': 0,
-          'completed': 0,
-          'cancelled': 0,
-        };
-      }
+    for (final plan in filteredPlans) {
+      final dmId = plan['dm_id']?.toString() ?? '';
+      final dmName = plan['dm_name']?.toString() ?? 'Unknown DM';
+      final key = '$dmId|$dmName';
       
-      final dmStats = stats[plan.dmId]!;
-      dmStats['total'] = (dmStats['total'] as int) + 1;
-      
-      switch (plan.status) {
-        case 'pending':
-          dmStats['pending'] = (dmStats['pending'] as int) + 1;
-          break;
-        case 'completed':
-          dmStats['completed'] = (dmStats['completed'] as int) + 1;
-          break;
-        case 'cancelled':
-          dmStats['cancelled'] = (dmStats['cancelled'] as int) + 1;
-          break;
+      if (!grouped.containsKey(key)) {
+        grouped[key] = [];
       }
+      grouped[key]!.add(plan);
     }
     
-    return {
-      'totalPlans': _allPlans.length,
-      'totalDMs': _dmIds.length,
-      'dmStats': stats.values.toList(),
-    };
+    return grouped;
+  }
+
+  void _previousMonth() {
+    setState(() {
+      _selectedMonth = DateTime(_selectedMonth.year, _selectedMonth.month - 1, 1);
+    });
+  }
+
+  void _nextMonth() {
+    setState(() {
+      _selectedMonth = DateTime(_selectedMonth.year, _selectedMonth.month + 1, 1);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final groupedPlans = _groupPlansByDM();
     final filteredPlans = _getFilteredPlans();
-    final plansForSelectedDay = _getPlansForDay(_selectedDay);
 
     return Scaffold(
       backgroundColor: AppColors.gray50,
@@ -151,505 +180,57 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
         child: Column(
           children: [
             // Header
-            Container(
-              decoration: const BoxDecoration(
-                gradient: AppColors.primaryGradient,
-                borderRadius: BorderRadius.only(
-                  bottomLeft: Radius.circular(24),
-                  bottomRight: Radius.circular(24),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black26,
-                    blurRadius: 10,
-                    offset: Offset(0, 4),
-                  ),
-                ],
-              ),
-              padding: const EdgeInsets.fromLTRB(24, 48, 24, 24),
-              child: Column(
-                children: [
-                  const Text(
-                    'View Plans',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'View all District Managers\' monthly plans',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 14,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
+            const AppHeader(
+              title: 'View Plans',
+              subtitle: 'View all District Managers\' monthly plans',
             ),
             // Content
             Expanded(
               child: _isLoading
                   ? const Center(child: CircularProgressIndicator())
-                  : SingleChildScrollView(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          // Statistics Card
-                          if (_allPlans.isNotEmpty) ...[
-                            _buildStatisticsCard(),
-                            const SizedBox(height: 24),
-                          ],
-                          // Filter by DM
-                          if (_dmIds.isNotEmpty) ...[
-                            Container(
-                              padding: const EdgeInsets.all(16),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(12),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.05),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      const Icon(Icons.filter_list,
-                                          color: AppColors.primaryBlue, size: 20),
-                                      const SizedBox(width: 8),
-                                      const Text(
-                                        'Filter by District Manager',
-                                        style: TextStyle(
-                                          color: AppColors.gray700,
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 12),
-                                  DropdownButtonFormField<String>(
-                                    value: _selectedDMId,
-                                    isExpanded: true,
-                                    decoration: InputDecoration(
-                                      border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                        borderSide: const BorderSide(
-                                          color: AppColors.gray200,
-                                          width: 2,
-                                        ),
-                                      ),
-                                      enabledBorder: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                        borderSide: const BorderSide(
-                                          color: AppColors.gray200,
-                                          width: 2,
-                                        ),
-                                      ),
-                                      focusedBorder: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                        borderSide: const BorderSide(
-                                          color: AppColors.primaryCyan,
-                                          width: 2,
-                                        ),
-                                      ),
-                                      filled: true,
-                                      fillColor: Colors.white,
-                                      contentPadding: const EdgeInsets.symmetric(
-                                        horizontal: 16,
-                                        vertical: 16,
-                                      ),
-                                    ),
-                                    hint: const Text('All District Managers'),
-                                    items: [
-                                      const DropdownMenuItem<String>(
-                                        value: null,
-                                        child: Text('All District Managers'),
-                                      ),
-                                      ..._dmIds.map((dmId) {
-                                        return DropdownMenuItem<String>(
-                                          value: dmId,
-                                          child: Row(
-                                            children: [
-                                              Container(
-                                                width: 12,
-                                                height: 12,
-                                                decoration: BoxDecoration(
-                                                  color: _dmColors[dmId] ??
-                                                      AppColors.primaryBlue,
-                                                  shape: BoxShape.circle,
-                                                ),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Expanded(
-                                                child: Text(
-                                                  _dmNames[dmId] ?? dmId,
-                                                  overflow: TextOverflow.ellipsis,
-                                                  maxLines: 1,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        );
-                                      }),
-                                    ],
-                                    onChanged: (value) {
-                                      setState(() {
-                                        _selectedDMId = value;
-                                      });
-                                    },
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 24),
-                          ],
-                          // Calendar
-                          Container(
-                            padding: const EdgeInsets.all(24),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(16),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.05),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
+                  : _errorMessage != null
+                      ? _buildErrorState()
+                      : RefreshIndicator(
+                          onRefresh: _loadData,
+                          child: SingleChildScrollView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            padding: const EdgeInsets.all(20),
                             child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                Row(
-                                  children: [
-                                    const Icon(Icons.calendar_month,
-                                        color: AppColors.primaryBlue, size: 20),
-                                    const SizedBox(width: 8),
-                                    const Text(
-                                      'Monthly Schedule',
-                                      style: TextStyle(
-                                        color: AppColors.gray700,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                                // Month Selector
+                                _buildMonthSelector(),
                                 const SizedBox(height: 16),
-                                TableCalendar<Plan>(
-                                  firstDay: DateTime.utc(2020, 1, 1),
-                                  lastDay: DateTime.utc(2030, 12, 31),
-                                  focusedDay: _focusedDay,
-                                  selectedDayPredicate: (day) {
-                                    return isSameDay(_selectedDay, day);
-                                  },
-                                  eventLoader: _getPlansForDay,
-                                  calendarStyle: const CalendarStyle(
-                                    outsideDaysVisible: false,
-                                    weekendTextStyle:
-                                        TextStyle(color: AppColors.primaryBlue),
-                                    selectedDecoration: BoxDecoration(
-                                      color: AppColors.primaryCyan,
-                                      shape: BoxShape.circle,
-                                    ),
-                                    todayDecoration: BoxDecoration(
-                                      color: AppColors.primaryBlue,
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
-                                  headerStyle: const HeaderStyle(
-                                    formatButtonVisible: false,
-                                    titleCentered: true,
-                                  ),
-                                  onDaySelected: (selectedDay, focusedDay) {
-                                    setState(() {
-                                      _selectedDay = selectedDay;
-                                      _focusedDay = focusedDay;
-                                    });
-                                  },
-                                  onPageChanged: (focusedDay) {
-                                    setState(() {
-                                      _focusedDay = focusedDay;
-                                    });
-                                  },
-                                  calendarBuilders: CalendarBuilders(
-                                    markerBuilder: (context, date, events) {
-                                      if (events.isNotEmpty) {
-                                        final plans = events;
-                                        if (plans.length == 1) {
-                                          // Single plan - show colored dot
-                                          return Positioned(
-                                            bottom: 1,
-                                            child: Container(
-                                              width: 8,
-                                              height: 8,
-                                              decoration: BoxDecoration(
-                                                color: _getColorForPlan(plans[0]),
-                                                shape: BoxShape.circle,
-                                              ),
-                                            ),
-                                          );
-                                        } else {
-                                          // Multiple plans - show indicator
-                                          return Positioned(
-                                            bottom: 1,
-                                            child: Container(
-                                              width: 8,
-                                              height: 8,
-                                              decoration: const BoxDecoration(
-                                                color: AppColors.primaryCyan,
-                                                shape: BoxShape.circle,
-                                              ),
-                                            ),
-                                          );
-                                        }
-                                      }
-                                      return null;
-                                    },
-                                  ),
-                                ),
+                                
+                                // Filter by DM
+                                _buildDMFilter(),
+                                const SizedBox(height: 16),
+                                
+                                // Statistics Summary
+                                _buildStatsSummary(filteredPlans),
+                                const SizedBox(height: 20),
+                                
+                                // Plans List by DM
+                                if (groupedPlans.isEmpty)
+                                  _buildEmptyState()
+                                else
+                                  ...groupedPlans.entries.map((entry) {
+                                    final parts = entry.key.split('|');
+                                    final dmId = parts[0];
+                                    final dmName = parts.length > 1 ? parts[1] : 'Unknown DM';
+                                    final dmPlans = entry.value;
+                                    final dmIndex = _allDMs.indexWhere((d) => d['id'] == dmId);
+                                    final color = _getColorForDM(dmIndex >= 0 ? dmIndex : 0);
+                                    
+                                    return _buildDMPlanCard(dmName, dmPlans, color);
+                                  }),
+                                
+                                // Bottom padding
+                                const SizedBox(height: 20),
                               ],
                             ),
                           ),
-                          const SizedBox(height: 24),
-                          // Selected Day Plans
-                          if (plansForSelectedDay.isNotEmpty) ...[
-                            Container(
-                              padding: const EdgeInsets.all(24),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(16),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.05),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      const Icon(Icons.event,
-                                          color: AppColors.primaryBlue, size: 20),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        'Plans for ${DateFormat('MMM dd, yyyy').format(_selectedDay)}',
-                                        style: const TextStyle(
-                                          color: AppColors.gray700,
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 16),
-                                  ...plansForSelectedDay.map((plan) {
-                                    return Container(
-                                      margin: const EdgeInsets.only(bottom: 12),
-                                      padding: const EdgeInsets.all(16),
-                                      decoration: BoxDecoration(
-                                        border: Border.all(
-                                          color: _getColorForPlan(plan),
-                                          width: 2,
-                                        ),
-                                        borderRadius: BorderRadius.circular(12),
-                                        color: _getColorForPlan(plan)
-                                            .withOpacity(0.05),
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          Container(
-                                            width: 12,
-                                            height: 12,
-                                            decoration: BoxDecoration(
-                                              color: _getColorForPlan(plan),
-                                              shape: BoxShape.circle,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 12),
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  plan.dmName,
-                                                  style: const TextStyle(
-                                                    fontSize: 14,
-                                                    fontWeight: FontWeight.w600,
-                                                    color: AppColors.gray900,
-                                                  ),
-                                                  overflow: TextOverflow.ellipsis,
-                                                  maxLines: 1,
-                                                ),
-                                                const SizedBox(height: 4),
-                                                Text(
-                                                  'MR: ${plan.mrName}',
-                                                  style: const TextStyle(
-                                                    fontSize: 12,
-                                                    color: AppColors.gray600,
-                                                  ),
-                                                  overflow: TextOverflow.ellipsis,
-                                                  maxLines: 1,
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                          Container(
-                                            padding:
-                                                const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 4,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: plan.status == 'completed'
-                                                  ? AppColors.success
-                                                  : plan.status == 'cancelled'
-                                                      ? AppColors.error
-                                                      : AppColors.warning,
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                            ),
-                                            child: Text(
-                                              plan.status.toUpperCase(),
-                                              style: const TextStyle(
-                                                fontSize: 10,
-                                                fontWeight: FontWeight.bold,
-                                                color: Colors.white,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    );
-                                  }),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 24),
-                          ],
-                          // Legend
-                          if (_dmIds.isNotEmpty) ...[
-                            Container(
-                              padding: const EdgeInsets.all(16),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(12),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.05),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'Legend',
-                                    style: TextStyle(
-                                      color: AppColors.gray700,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 12),
-                                  Wrap(
-                                    spacing: 16,
-                                    runSpacing: 8,
-                                    children: _dmIds.map((dmId) {
-                                      return Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Container(
-                                            width: 12,
-                                            height: 12,
-                                            decoration: BoxDecoration(
-                                              color: _dmColors[dmId] ??
-                                                  AppColors.primaryBlue,
-                                              shape: BoxShape.circle,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            _dmNames[dmId] ?? dmId,
-                                            style: const TextStyle(
-                                              fontSize: 12,
-                                              color: AppColors.gray600,
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                            maxLines: 1,
-                                          ),
-                                        ],
-                                      );
-                                    }).toList(),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                          // Empty State
-                          if (filteredPlans.isEmpty) ...[
-                            const SizedBox(height: 24),
-                            Container(
-                              padding: const EdgeInsets.all(32),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(16),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.05),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
-                              ),
-                              child: const Column(
-                                children: [
-                                  Icon(
-                                    Icons.calendar_today,
-                                    size: 64,
-                                    color: AppColors.gray400,
-                                  ),
-                                  SizedBox(height: 16),
-                                  Text(
-                                    'No plans found',
-                                    style: TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.w600,
-                                      color: AppColors.gray700,
-                                    ),
-                                  ),
-                                  SizedBox(height: 8),
-                                  Text(
-                                    'District Managers haven\'t created any plans yet.',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: AppColors.gray600,
-                                    ),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
+                        ),
             ),
             // Bottom Navigation
             BottomNav(
@@ -663,12 +244,196 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
     );
   }
 
-  Widget _buildStatisticsCard() {
-    final stats = _calculateStatistics();
-    final dmStatsList = stats['dmStats'] as List<Map<String, dynamic>>;
-
+  Widget _buildMonthSelector() {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          IconButton(
+            onPressed: _previousMonth,
+            icon: const Icon(Icons.chevron_left, color: AppColors.primaryBlue),
+          ),
+          Text(
+            DateFormat('MMMM yyyy').format(_selectedMonth),
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: AppColors.gray700,
+            ),
+          ),
+          IconButton(
+            onPressed: _nextMonth,
+            icon: const Icon(Icons.chevron_right, color: AppColors.primaryBlue),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDMFilter() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.filter_list, color: AppColors.primaryBlue, size: 20),
+              SizedBox(width: 8),
+              Text(
+                'Filter by District Manager',
+                style: TextStyle(
+                  color: AppColors.gray700,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: _selectedDMId,
+            isExpanded: true,
+            decoration: InputDecoration(
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: AppColors.gray200),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: AppColors.gray200),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: AppColors.primaryCyan, width: 2),
+              ),
+              filled: true,
+              fillColor: AppColors.gray50,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            ),
+            hint: const Text('All District Managers'),
+            items: [
+              const DropdownMenuItem<String>(
+                value: null,
+                child: Text('All District Managers'),
+              ),
+              ..._allDMs.asMap().entries.map((entry) {
+                final dm = entry.value;
+                final index = entry.key;
+                return DropdownMenuItem<String>(
+                  value: dm['id']?.toString(),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: _getColorForDM(index),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          dm['name']?.toString() ?? 'Unknown',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ],
+            onChanged: (value) {
+              setState(() {
+                _selectedDMId = value;
+              });
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatsSummary(List<Map<String, dynamic>> plans) {
+    final totalPlans = plans.length;
+    final pendingPlans = plans.where((p) => p['status'] == 'pending').length;
+    final completedPlans = plans.where((p) => p['status'] == 'completed').length;
+
+    return Row(
+      children: [
+        Expanded(
+          child: _buildStatCard('Total', '$totalPlans', AppColors.primaryBlue, Icons.calendar_today),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _buildStatCard('Pending', '$pendingPlans', AppColors.warning, Icons.pending_actions),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _buildStatCard('Done', '$completedPlans', AppColors.success, Icons.check_circle),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatCard(String label, String value, Color color, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 22),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: TextStyle(
+              color: color,
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          Text(
+            label,
+            style: const TextStyle(
+              color: AppColors.gray600,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDMPlanCard(String dmName, List<Map<String, dynamic>> plans, Color color) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -681,247 +446,317 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
         ],
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Icon(Icons.bar_chart, color: AppColors.primaryBlue, size: 20),
-              const SizedBox(width: 8),
-              const Text(
-                'Plans Statistics',
-                style: TextStyle(
-                  color: AppColors.gray700,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          // Overall Stats
-          Row(
-            children: [
-              Expanded(
-                child: _buildStatItem(
-                  'Total Plans',
-                  '${stats['totalPlans']}',
-                  AppColors.primaryBlue,
-                  Icons.calendar_today,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildStatItem(
-                  'District Managers',
-                  '${stats['totalDMs']}',
-                  AppColors.primaryCyan,
-                  Icons.people,
-                ),
-              ),
-            ],
-          ),
-          if (dmStatsList.isNotEmpty) ...[
-            const SizedBox(height: 24),
-            const Divider(),
-            const SizedBox(height: 16),
-            const Text(
-              'Per District Manager',
-              style: TextStyle(
-                color: AppColors.gray700,
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
+          // DM Header
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(16),
+                topRight: Radius.circular(16),
               ),
             ),
-            const SizedBox(height: 12),
-            ...dmStatsList.map((dmStat) {
-              final total = dmStat['total'] as int;
-              final pending = dmStat['pending'] as int;
-              final completed = dmStat['completed'] as int;
-              final completionRate = total > 0 ? (completed / total * 100).toStringAsFixed(1) : '0.0';
-
-              return Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  border: Border.all(color: AppColors.gray200),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 12,
-                          height: 12,
-                          decoration: BoxDecoration(
-                            color: _dmColors[_dmIds.firstWhere(
-                              (id) => _dmNames[id] == dmStat['dmName'],
-                              orElse: () => '',
-                            )] ?? AppColors.primaryBlue,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            dmStat['dmName'] as String,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.gray900,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 1,
-                          ),
-                        ),
-                      ],
+            child: Row(
+              children: [
+                // Avatar
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Text(
+                      dmName.split(' ').take(2).map((e) => e.isNotEmpty ? e[0].toUpperCase() : '').join(),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Total',
-                                style: TextStyle(
-                                  color: AppColors.gray600,
-                                  fontSize: 12,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '$total',
-                                style: const TextStyle(
-                                  color: AppColors.primaryBlue,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Pending',
-                                style: TextStyle(
-                                  color: AppColors.gray600,
-                                  fontSize: 12,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '$pending',
-                                style: const TextStyle(
-                                  color: AppColors.warning,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Completed',
-                                style: TextStyle(
-                                  color: AppColors.gray600,
-                                  fontSize: 12,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '$completed',
-                                style: const TextStyle(
-                                  color: AppColors.success,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Rate',
-                                style: TextStyle(
-                                  color: AppColors.gray600,
-                                  fontSize: 12,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '$completionRate%',
-                                style: const TextStyle(
-                                  color: AppColors.primaryCyan,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+                  ),
                 ),
-              );
-            }),
-          ],
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        dmName,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.gray900,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        '${plans.length} planned visits',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: color,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Plans List
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              children: plans.asMap().entries.map((entry) {
+                final plan = entry.value;
+                final isLast = entry.key == plans.length - 1;
+                
+                return _buildPlanItem(plan, color, isLast);
+              }).toList(),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildStatItem(String label, String value, Color color, IconData icon) {
+  Widget _buildPlanItem(Map<String, dynamic> plan, Color color, bool isLast) {
+    final date = plan['date']?.toString() ?? '';
+    final mrName = plan['mr_name']?.toString() ?? 'Unknown MR';
+    final status = plan['status']?.toString() ?? 'pending';
+    
+    DateTime? planDate;
+    try {
+      planDate = DateTime.parse(date);
+    } catch (e) {
+      planDate = null;
+    }
+    
+    final isToday = planDate != null && 
+        planDate.year == DateTime.now().year &&
+        planDate.month == DateTime.now().month &&
+        planDate.day == DateTime.now().day;
+
     return Container(
-      padding: const EdgeInsets.all(16),
+      margin: EdgeInsets.only(bottom: isLast ? 0 : 10),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
+        color: isToday ? color.withOpacity(0.05) : AppColors.gray50,
+        borderRadius: BorderRadius.circular(10),
+        border: isToday ? Border.all(color: color.withOpacity(0.3), width: 1) : null,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Row(
-            children: [
-              Icon(icon, color: color, size: 20),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  label,
+          // Date
+          Container(
+            width: 48,
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            decoration: BoxDecoration(
+              color: isToday ? color : Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: isToday ? color : AppColors.gray200),
+            ),
+            child: Column(
+              children: [
+                Text(
+                  planDate != null ? DateFormat('d').format(planDate) : '--',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: isToday ? Colors.white : AppColors.gray700,
+                  ),
+                ),
+                Text(
+                  planDate != null ? DateFormat('EEE').format(planDate) : '',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: isToday ? Colors.white70 : AppColors.gray400,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          // MR Info
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  mrName,
                   style: const TextStyle(
-                    color: AppColors.gray600,
-                    fontSize: 12,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.gray900,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
-              ),
-            ],
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    Icon(Icons.badge_outlined, size: 12, color: AppColors.gray400),
+                    const SizedBox(width: 4),
+                    const Text(
+                      'Medical Rep',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppColors.gray400,
+                      ),
+                    ),
+                    if (isToday) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: color,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          'TODAY',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: TextStyle(
-              color: color,
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
+          // Status Badge
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: status == 'completed'
+                  ? AppColors.success.withOpacity(0.1)
+                  : status == 'cancelled'
+                      ? AppColors.error.withOpacity(0.1)
+                      : AppColors.warning.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              status.toUpperCase(),
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                color: status == 'completed'
+                    ? AppColors.success
+                    : status == 'cancelled'
+                        ? AppColors.error
+                        : AppColors.warning,
+              ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Container(
+      padding: const EdgeInsets.all(32),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              color: AppColors.gray100,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.calendar_today_outlined,
+              size: 40,
+              color: AppColors.gray400,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No plans for ${DateFormat('MMMM yyyy').format(_selectedMonth)}',
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: AppColors.gray700,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'District Managers haven\'t created any plans for this month yet.',
+            style: TextStyle(
+              fontSize: 14,
+              color: AppColors.gray400,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: AppColors.error.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.error_outline,
+                size: 40,
+                color: AppColors.error,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _errorMessage ?? 'An error occurred',
+              style: const TextStyle(
+                fontSize: 16,
+                color: AppColors.gray700,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: _loadData,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primaryBlue,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
-

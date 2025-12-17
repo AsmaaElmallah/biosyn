@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:biosyn_report_flutter/theme/colors.dart';
 import 'package:biosyn_report_flutter/widgets/bottom_nav.dart';
+import 'package:biosyn_report_flutter/widgets/app_header.dart';
 import 'package:biosyn_report_flutter/widgets/connectivity_indicator.dart';
 import 'package:biosyn_report_flutter/widgets/sync_status_indicator.dart';
 import 'package:biosyn_report_flutter/models/coaching_report.dart';
@@ -181,44 +182,12 @@ class GMDashboardScreen extends StatelessWidget {
       body: SafeArea(
         child: Column(
           children: [
+            // Connectivity Indicator
+            const ConnectivityIndicator(),
             // Header
-            Container(
-              decoration: const BoxDecoration(
-                gradient: AppColors.primaryGradient,
-                borderRadius: BorderRadius.only(
-                  bottomLeft: Radius.circular(24),
-                  bottomRight: Radius.circular(24),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black26,
-                    blurRadius: 10,
-                    offset: Offset(0, 4),
-                  ),
-                ],
-              ),
-              padding: const EdgeInsets.fromLTRB(24, 48, 24, 24),
-              child: Column(
-                children: [
-                  const Text(
-                    'GM Dashboard',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Organization-wide coaching analytics',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 14,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
+            const AppHeader(
+              title: 'GM Dashboard',
+              subtitle: 'Organization-wide coaching analytics',
             ),
             // Content
             Expanded(
@@ -573,135 +542,148 @@ class GMDashboardScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 16),
                         dmPerformance.isEmpty
-                            ? const Center(
+                            ? Center(
                                 child: Padding(
-                                  padding: EdgeInsets.all(32),
-                                  child: Text(
-                                    'No data available',
-                                    style: TextStyle(color: AppColors.gray600),
+                                  padding: const EdgeInsets.all(32),
+                                  child: Column(
+                                    children: [
+                                      Container(
+                                        width: 64,
+                                        height: 64,
+                                        decoration: BoxDecoration(
+                                          color: AppColors.gray100,
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Icon(Icons.people_outline, size: 32, color: AppColors.gray400),
+                                      ),
+                                      const SizedBox(height: 16),
+                                      const Text(
+                                        'No data available',
+                                        style: TextStyle(color: AppColors.gray600, fontSize: 16),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               )
                             : Column(
                                 children: dmPerformance.map((dm) {
+                                  final avgScore = dm['avgScore'] as double;
+                                  final scoreColor = avgScore >= 5 
+                                      ? AppColors.success 
+                                      : avgScore >= 3 
+                                          ? AppColors.warning 
+                                          : AppColors.error;
+                                  
                                   return Container(
                                     margin: const EdgeInsets.only(bottom: 12),
-                                    padding: const EdgeInsets.all(16),
                                     decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(16),
                                       border: Border.all(color: AppColors.gray200),
-                                      borderRadius: BorderRadius.circular(12),
                                     ),
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                          children: [
-                                            Expanded(
-                                              child: Text(
-                                                dm['name'],
-                                                style: const TextStyle(
-                                                  fontSize: 16,
-                                                  fontWeight: FontWeight.w500,
-                                                  color: AppColors.gray900,
+                                        // Header with Avatar
+                                        Padding(
+                                          padding: const EdgeInsets.all(16),
+                                          child: Row(
+                                            children: [
+                                              // Avatar
+                                              Container(
+                                                width: 48,
+                                                height: 48,
+                                                decoration: BoxDecoration(
+                                                  gradient: AppColors.primaryGradient,
+                                                  shape: BoxShape.circle,
                                                 ),
-                                                overflow: TextOverflow.ellipsis,
-                                                maxLines: 2,
-                                              ),
-                                            ),
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(
-                                                horizontal: 12,
-                                                vertical: 6,
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color: AppColors.primaryBlue.withOpacity(0.1),
-                                                borderRadius: BorderRadius.circular(20),
-                                              ),
-                                              child: const Text(
-                                                'Active',
-                                                style: TextStyle(
-                                                  color: AppColors.primaryBlue,
-                                                  fontSize: 12,
-                                                  fontWeight: FontWeight.w500,
+                                                child: Center(
+                                                  child: Text(
+                                                    (dm['name'] as String).split(' ').take(2).map((e) => e.isNotEmpty ? e[0].toUpperCase() : '').join(),
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 16,
+                                                      fontWeight: FontWeight.bold,
+                                                    ),
+                                                  ),
                                                 ),
                                               ),
-                                            ),
-                                          ],
+                                              const SizedBox(width: 12),
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
+                                                      dm['name'],
+                                                      style: const TextStyle(
+                                                        fontSize: 16,
+                                                        fontWeight: FontWeight.w600,
+                                                        color: AppColors.gray900,
+                                                      ),
+                                                      overflow: TextOverflow.ellipsis,
+                                                      maxLines: 1,
+                                                    ),
+                                                    const SizedBox(height: 2),
+                                                    const Text(
+                                                      'District Manager',
+                                                      style: TextStyle(
+                                                        fontSize: 12,
+                                                        color: AppColors.gray400,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                              // Score Badge
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                                decoration: BoxDecoration(
+                                                  color: scoreColor.withOpacity(0.1),
+                                                  borderRadius: BorderRadius.circular(20),
+                                                ),
+                                                child: Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    Icon(Icons.star, color: scoreColor, size: 14),
+                                                    const SizedBox(width: 4),
+                                                    Text(
+                                                      '${dm['avgScore']}',
+                                                      style: TextStyle(
+                                                        color: scoreColor,
+                                                        fontSize: 14,
+                                                        fontWeight: FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
                                         ),
-                                        const SizedBox(height: 12),
-                                        Row(
-                                          children: [
-                                            Expanded(
-                                              child: Column(
-                                                crossAxisAlignment: CrossAxisAlignment.start,
-                                                children: [
-                                                  const Text(
-                                                    'Visits',
-                                                    style: TextStyle(
-                                                      color: AppColors.gray600,
-                                                      fontSize: 12,
-                                                    ),
-                                                  ),
-                                                  const SizedBox(height: 4),
-                                                  Text(
-                                                    '${dm['visits']}',
-                                                    style: const TextStyle(
-                                                      color: AppColors.primaryBlue,
-                                                      fontSize: 16,
-                                                      fontWeight: FontWeight.bold,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
+                                        // Stats Row
+                                        Container(
+                                          padding: const EdgeInsets.all(16),
+                                          decoration: BoxDecoration(
+                                            color: AppColors.gray50,
+                                            borderRadius: const BorderRadius.only(
+                                              bottomLeft: Radius.circular(16),
+                                              bottomRight: Radius.circular(16),
                                             ),
-                                            Expanded(
-                                              child: Column(
-                                                crossAxisAlignment: CrossAxisAlignment.start,
-                                                children: [
-                                                  const Text(
-                                                    'Avg Score',
-                                                    style: TextStyle(
-                                                      color: AppColors.gray600,
-                                                      fontSize: 12,
-                                                    ),
-                                                  ),
-                                                  const SizedBox(height: 4),
-                                                  Text(
-                                                    '${dm['avgScore']}',
-                                                    style: const TextStyle(
-                                                      color: AppColors.success,
-                                                      fontSize: 16,
-                                                      fontWeight: FontWeight.bold,
-                                                    ),
-                                                  ),
-                                                ],
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              Expanded(
+                                                child: _buildDMStatItem('Visits', '${dm['visits']}', AppColors.primaryBlue),
                                               ),
-                                            ),
-                                            Expanded(
-                                              child: Column(
-                                                crossAxisAlignment: CrossAxisAlignment.start,
-                                                children: [
-                                                  const Text(
-                                                    'MRs Coached',
-                                                    style: TextStyle(
-                                                      color: AppColors.gray600,
-                                                      fontSize: 12,
-                                                    ),
-                                                  ),
-                                                  const SizedBox(height: 4),
-                                                  Text(
-                                                    '${dm['mrCount']}',
-                                                    style: const TextStyle(
-                                                      color: Colors.purple,
-                                                      fontSize: 16,
-                                                      fontWeight: FontWeight.bold,
-                                                    ),
-                                                  ),
-                                                ],
+                                              Container(width: 1, height: 32, color: AppColors.gray200),
+                                              Expanded(
+                                                child: _buildDMStatItem('MRs', '${dm['mrCount']}', Colors.purple),
                                               ),
-                                            ),
-                                          ],
+                                              Container(width: 1, height: 32, color: AppColors.gray200),
+                                              Expanded(
+                                                child: _buildDMStatItem('Score', '${dm['avgScore']}/6', scoreColor),
+                                              ),
+                                            ],
+                                          ),
                                         ),
                                       ],
                                     ),
@@ -740,14 +722,16 @@ class GMDashboardScreen extends StatelessWidget {
                                     child: const Row(
                                       mainAxisAlignment: MainAxisAlignment.center,
                                       children: [
-                                        Icon(Icons.file_download, color: Colors.white, size: 20),
+                                        Icon(Icons.file_download_outlined, color: Colors.white, size: 20),
                                         SizedBox(width: 8),
-                                        Text(
-                                          'Export Report',
-                                          style: TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w500,
+                                        Flexible(
+                                          child: Text(
+                                            'Export',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w500,
+                                            ),
                                           ),
                                         ),
                                       ],
@@ -759,41 +743,47 @@ class GMDashboardScreen extends StatelessWidget {
                           ),
                           const SizedBox(width: 12),
                           Expanded(
-                            child: InkWell(
-                              onTap: () {
-                                onTabChange('reports');
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(vertical: 16),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  border: Border.all(
-                                    color: AppColors.primaryBlue,
-                                    width: 2,
-                                  ),
-                                  borderRadius: BorderRadius.circular(12),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.05),
-                                      blurRadius: 10,
-                                      offset: const Offset(0, 2),
+                            child: Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                onTap: () {
+                                  onTabChange('reports');
+                                },
+                                borderRadius: BorderRadius.circular(12),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(vertical: 16),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    border: Border.all(
+                                      color: AppColors.primaryBlue,
+                                      width: 2,
                                     ),
-                                  ],
-                                ),
-                                child: const Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.trending_up, color: AppColors.primaryBlue, size: 20),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      'View Analytics',
-                                      style: TextStyle(
-                                        color: AppColors.primaryBlue,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w500,
+                                    borderRadius: BorderRadius.circular(12),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.05),
+                                        blurRadius: 10,
+                                        offset: const Offset(0, 2),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
+                                  child: const Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.analytics_outlined, color: AppColors.primaryBlue, size: 20),
+                                      SizedBox(width: 8),
+                                      Flexible(
+                                        child: Text(
+                                          'Reports',
+                                          style: TextStyle(
+                                            color: AppColors.primaryBlue,
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
@@ -801,47 +791,55 @@ class GMDashboardScreen extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 12),
-                      InkWell(
-                        onTap: () {
-                          onTabChange('plans');
-                        },
-                        child: Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            border: Border.all(
-                              color: AppColors.primaryCyan,
-                              width: 2,
-                            ),
-                            borderRadius: BorderRadius.circular(12),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
-                                blurRadius: 10,
-                                offset: const Offset(0, 2),
+                      Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: () {
+                            onTabChange('plans');
+                          },
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              border: Border.all(
+                                color: AppColors.primaryCyan,
+                                width: 2,
                               ),
-                            ],
-                          ),
-                          child: const Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.calendar_month, color: AppColors.primaryCyan, size: 20),
-                              SizedBox(width: 8),
-                              Text(
-                                'View Plans',
-                                style: TextStyle(
-                                  color: AppColors.primaryCyan,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w500,
+                              borderRadius: BorderRadius.circular(12),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.05),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 2),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
+                            child: const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.calendar_month_outlined, color: AppColors.primaryCyan, size: 20),
+                                SizedBox(width: 8),
+                                Flexible(
+                                  child: Text(
+                                    'View Plans',
+                                    style: TextStyle(
+                                      color: AppColors.primaryCyan,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
                     ],
                   ),
+                  // Bottom padding for navigation
+                  const SizedBox(height: 20),
                   ],
                 ),
               ),
@@ -940,6 +938,29 @@ class GMDashboardScreen extends StatelessWidget {
         ],
       ),
       child: child,
+    );
+  }
+
+  Widget _buildDMStatItem(String label, String value, Color color) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: const TextStyle(
+            color: AppColors.gray600,
+            fontSize: 12,
+          ),
+        ),
+      ],
     );
   }
 }
