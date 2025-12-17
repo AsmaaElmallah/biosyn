@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:biosyn_report_flutter/theme/colors.dart';
 import 'package:biosyn_report_flutter/widgets/bottom_nav.dart';
+import 'package:biosyn_report_flutter/widgets/app_header.dart';
 import 'package:biosyn_report_flutter/widgets/connectivity_indicator.dart';
 import 'package:biosyn_report_flutter/widgets/sync_status_indicator.dart';
 import 'package:intl/intl.dart';
@@ -42,6 +43,16 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
 
   String get _dmId => widget.dmId ?? 'dm_001';
   String get _dmName => widget.dmName ?? 'District Manager';
+
+  // Helper to safely get selected MR name
+  String _getSelectedMRName() {
+    if (_selectedMR == null || _medicalReps.isEmpty) return 'MR';
+    final mr = _medicalReps.firstWhere(
+      (m) => m['id'] == _selectedMR,
+      orElse: () => {'id': '', 'name': 'Medical Rep'},
+    );
+    return mr['name'] ?? 'Medical Rep';
+  }
 
   @override
   void initState() {
@@ -257,42 +268,9 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
             // Connectivity Indicator
             const ConnectivityIndicator(),
             // Header
-            Container(
-              decoration: const BoxDecoration(
-                gradient: AppColors.primaryGradient,
-                borderRadius: BorderRadius.only(
-                  bottomLeft: Radius.circular(24),
-                  bottomRight: Radius.circular(24),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black26,
-                    blurRadius: 10,
-                    offset: Offset(0, 4),
-                  ),
-                ],
-              ),
-              padding: const EdgeInsets.fromLTRB(24, 48, 24, 24),
-              child: Column(
-                children: [
-                  const Text(
-                    'Field Coaching',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Schedule and manage coaching visits',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 14,
-                    ),
-                  ),
-                ],
-              ),
+            const AppHeader(
+              title: 'Field Coaching',
+              subtitle: 'Schedule and manage coaching visits',
             ),
             // Content
             Expanded(
@@ -609,7 +587,7 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
                               ],
                             ),
                           ),
-                          if (_selectedMR != null) ...[
+                          if (_selectedMR != null && _medicalReps.isNotEmpty) ...[
                             const SizedBox(height: 24),
                             // Selected MR Card - Enhanced Design
                             Container(
@@ -673,7 +651,7 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
                                           ),
                                           child: Center(
                                             child: Text(
-                                              (_medicalReps.firstWhere((m) => m['id'] == _selectedMR)['name'] ?? 'M')
+                                              _getSelectedMRName()
                                                   .split(' ')
                                                   .take(2)
                                                   .map((e) => e.isNotEmpty ? e[0].toUpperCase() : '')
@@ -708,7 +686,7 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
                                               ),
                                               const SizedBox(height: 8),
                                               Text(
-                                                _medicalReps.firstWhere((m) => m['id'] == _selectedMR)['name']!,
+                                                _getSelectedMRName(),
                                                 style: const TextStyle(
                                                   color: Colors.white,
                                                   fontSize: 18,
@@ -759,10 +737,10 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
                             ),
                           ],
                           const SizedBox(height: 24),
-                          // Action Buttons
-                          Row(
-                            children: [
-                              if (_view == 'schedule') ...[
+                          // Action Buttons - Only in Schedule mode
+                          if (_view == 'schedule') ...[
+                            Row(
+                              children: [
                                 Expanded(
                                   child: _buildActionButton(
                                     label: 'Save Plan',
@@ -780,47 +758,16 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
                                     color: Colors.red,
                                   ),
                                 ),
-                              ] else ...[
-                                Expanded(
-                                  child: _buildActionButton(
-                                    label: 'Start Coaching Session',
-                                    icon: Icons.description,
-                                    onTap: _handleStartCoaching,
-                                    gradient: AppColors.primaryGradientHorizontal,
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                          const SizedBox(height: 24),
-                          // Info Card
-                          Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: AppColors.primaryCyan.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: AppColors.primaryCyan.withOpacity(0.3),
-                              ),
-                            ),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Icon(Icons.info_outline,
-                                    color: AppColors.primaryBlue, size: 24),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    'Note: Coaching reports cannot be submitted after 12:00 AM (midnight). Make sure to complete your session before the deadline.',
-                                    style: TextStyle(
-                                      color: AppColors.gray700,
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                ),
                               ],
                             ),
-                          ),
+                            const SizedBox(height: 24),
+                            // Monthly Plans Card
+                            _buildMonthlyPlansCard(),
+                          ] else ...[
+                            // Today Plan Card with Start Session
+                            _buildTodayPlanCard(),
+                          ],
+                          const SizedBox(height: 100), // Extra space for scroll
                         ],
                       ),
                     ),
@@ -883,6 +830,544 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
         ),
       ),
     );
+  }
+
+  // Get all plans for the focused month
+  List<Plan> _getMonthPlans() {
+    final firstDayOfMonth = DateTime(_focusedDay.year, _focusedDay.month, 1);
+    final lastDayOfMonth = DateTime(_focusedDay.year, _focusedDay.month + 1, 0);
+    
+    return _plans.where((plan) {
+      final planDate = DateTime.parse(plan.date);
+      return planDate.isAfter(firstDayOfMonth.subtract(const Duration(days: 1))) &&
+             planDate.isBefore(lastDayOfMonth.add(const Duration(days: 1)));
+    }).toList()
+      ..sort((a, b) => a.date.compareTo(b.date));
+  }
+
+  // Monthly Plans Card - Shows all scheduled plans for the month
+  Widget _buildMonthlyPlansCard() {
+    final monthPlans = _getMonthPlans();
+    
+    if (monthPlans.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: AppColors.gray100,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          children: [
+            const Icon(Icons.event_busy, color: AppColors.gray400, size: 48),
+            const SizedBox(height: 12),
+            Text(
+              'No plans for ${DateFormat('MMMM yyyy').format(_focusedDay)}',
+              style: const TextStyle(
+                color: AppColors.gray600,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Select a date, choose an MR, and save to schedule visits',
+              style: TextStyle(color: AppColors.gray400, fontSize: 13),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: AppColors.primaryGradientHorizontal,
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(16),
+                topRight: Radius.circular(16),
+              ),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.calendar_month, color: Colors.white, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Plans for ${DateFormat('MMMM yyyy').format(_focusedDay)}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '${monthPlans.length} visits',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Plans list
+          ListView.separated(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: monthPlans.length,
+            separatorBuilder: (_, __) => Divider(height: 1, color: AppColors.gray200),
+            itemBuilder: (context, index) {
+              final plan = monthPlans[index];
+              final planDate = DateTime.parse(plan.date);
+              final isToday = DateFormat('yyyy-MM-dd').format(planDate) == 
+                              DateFormat('yyyy-MM-dd').format(DateTime.now());
+              
+              return ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                leading: Container(
+                  width: 50,
+                  height: 50,
+                  decoration: BoxDecoration(
+                    color: isToday ? AppColors.primaryCyan : AppColors.gray100,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        DateFormat('d').format(planDate),
+                        style: TextStyle(
+                          color: isToday ? Colors.white : AppColors.gray700,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        DateFormat('E').format(planDate),
+                        style: TextStyle(
+                          color: isToday ? Colors.white70 : AppColors.gray400,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                title: Text(
+                  plan.mrName,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 15,
+                  ),
+                ),
+                subtitle: Row(
+                  children: [
+                    Icon(Icons.badge, size: 14, color: AppColors.gray400),
+                    const SizedBox(width: 4),
+                    const Text('Medical Rep', style: TextStyle(fontSize: 12)),
+                    if (isToday) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryCyan.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          'TODAY',
+                          style: TextStyle(
+                            color: AppColors.primaryCyan,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                trailing: IconButton(
+                  icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                  onPressed: () => _deletePlanForDate(plan),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Today Plan Card - Shows plan for today or allows quick session start
+  Widget _buildTodayPlanCard() {
+    final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+    final plan = _plans.firstWhere(
+      (p) => p.date == dateStr,
+      orElse: () => Plan(
+        id: '',
+        dmId: _dmId,
+        dmName: _dmName,
+        date: dateStr,
+        mrId: '',
+        mrName: '',
+      ),
+    );
+
+    // If plan exists for today - show it
+    if (plan.id.isNotEmpty) {
+      return Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.primaryCyan.withOpacity(0.3), width: 2),
+        ),
+        child: Column(
+          children: [
+            // Header - Scheduled
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: AppColors.primaryGradientHorizontal,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(14),
+                  topRight: Radius.circular(14),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.event_available, color: Colors.white, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      "Scheduled Visit - ${DateFormat('MMM d').format(_selectedDate)}",
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Text(
+                      'FROM SCHEDULE',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // MR Info
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      gradient: AppColors.primaryGradient,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Center(
+                      child: Text(
+                        plan.mrName.isNotEmpty ? plan.mrName[0].toUpperCase() : 'M',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          plan.mrName,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Medical Representative',
+                          style: TextStyle(color: AppColors.gray400, fontSize: 13),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // Start Coaching Button
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: SizedBox(
+                width: double.infinity,
+                child: _buildActionButton(
+                  label: 'Start Coaching Session',
+                  icon: Icons.play_arrow,
+                  onTap: () {
+                    widget.onStartCoaching(
+                      DateFormat('yyyy-MM-dd').format(_selectedDate),
+                      plan.mrId,
+                      plan.mrName,
+                    );
+                  },
+                  gradient: AppColors.primaryGradientHorizontal,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // No plan for today - allow quick session start
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          // Header - Quick Start
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: const BoxDecoration(
+              color: AppColors.primaryBlue,
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(16),
+                topRight: Radius.circular(16),
+              ),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.flash_on, color: Colors.white, size: 20),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Quick Coaching Session',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    'NO SCHEDULE',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Info text
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline, color: AppColors.primaryCyan, size: 20),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'No scheduled visit for ${DateFormat('MMM d').format(_selectedDate)}. Select an MR above to start a quick session.',
+                    style: const TextStyle(
+                      color: AppColors.gray600,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Start Button (only if MR selected)
+          if (_selectedMR != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: SizedBox(
+                width: double.infinity,
+                child: _buildActionButton(
+                  label: 'Start Quick Session',
+                  icon: Icons.play_arrow,
+                  onTap: _handleStartCoaching,
+                  gradient: AppColors.primaryGradientHorizontal,
+                ),
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                decoration: BoxDecoration(
+                  color: AppColors.gray200,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.person_add, color: AppColors.gray400, size: 20),
+                    SizedBox(width: 8),
+                    Text(
+                      'Select MR to Start',
+                      style: TextStyle(
+                        color: AppColors.gray400,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deletePlanForDate(Plan plan) async {
+    final planDate = DateTime.parse(plan.date);
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.delete_outline, color: Colors.red, size: 24),
+            ),
+            const SizedBox(width: 12),
+            const Flexible(child: Text('Delete Plan')),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Are you sure you want to delete the plan for ${plan.mrName}?',
+              style: const TextStyle(fontSize: 15),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Date: ${DateFormat('EEEE, MMM d, yyyy').format(planDate)}',
+              style: const TextStyle(color: AppColors.gray400, fontSize: 13),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('Delete', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        await PlanService.deletePlan(plan.id);
+        setState(() {
+          _selectedMR = null;
+        });
+        await _loadPlans();
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.check_circle, color: Colors.white),
+                  const SizedBox(width: 8),
+                  Text('Plan for ${plan.mrName} deleted'),
+                ],
+              ),
+              backgroundColor: Colors.green,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to delete plan: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
   }
 
   Widget _buildActionButton({

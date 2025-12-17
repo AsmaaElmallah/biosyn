@@ -20,12 +20,9 @@ class BottomNav extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border(
-          top: BorderSide(color: AppColors.gray200, width: 1),
-        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
+            color: Colors.black.withOpacity(0.08),
             blurRadius: 10,
             offset: const Offset(0, -2),
           ),
@@ -33,57 +30,45 @@ class BottomNav extends StatelessWidget {
       ),
       child: SafeArea(
         child: Container(
-          height: 64,
-          constraints: const BoxConstraints(maxWidth: 672), // max-w-2xl
-          margin: const EdgeInsets.symmetric(horizontal: 0),
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+          height: 60,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: tabs.map((tab) {
               final isActive = activeTab == tab['id'];
               return Expanded(
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () => onTabChange(tab['id'] as String),
-                    child: Container(
-                      height: 64,
-                      child: Stack(
-                        children: [
-                          Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                tab['icon'] as IconData,
-                                color: isActive ? AppColors.primaryBlue : AppColors.gray400,
-                                size: 24,
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                tab['label'] as String,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: isActive ? AppColors.primaryBlue : AppColors.gray400,
-                                  fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
-                                ),
-                              ),
-                            ],
-                          ),
-                          if (isActive)
-                            Positioned(
-                              bottom: 0,
-                              left: 0,
-                              right: 0,
-                              child: Container(
-                                height: 4,
-                                decoration: const BoxDecoration(
-                                  gradient: AppColors.primaryGradientHorizontal,
-                                ),
-                              ),
-                            ),
-                        ],
+                child: GestureDetector(
+                  onTap: () => onTabChange(tab['id'] as String),
+                  behavior: HitTestBehavior.opaque,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        tab['icon'] as IconData,
+                        color: isActive ? AppColors.primaryBlue : AppColors.gray400,
+                        size: 24,
                       ),
-                    ),
+                      const SizedBox(height: 4),
+                      Text(
+                        tab['label'] as String,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isActive ? AppColors.primaryBlue : AppColors.gray400,
+                          fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      // Short centered indicator
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        height: 3,
+                        width: isActive ? 40 : 0,
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryBlue,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               );
@@ -95,17 +80,16 @@ class BottomNav extends StatelessWidget {
   }
 
   static const List<Map<String, dynamic>> _dmTabs = [
-    {'id': 'planning', 'label': 'Coaching', 'icon': Icons.home},
+    {'id': 'planning', 'label': 'Coaching', 'icon': Icons.home_outlined},
     {'id': 'dashboard', 'label': 'Dashboard', 'icon': Icons.bar_chart},
-    {'id': 'profile', 'label': 'Profile', 'icon': Icons.settings},
+    {'id': 'profile', 'label': 'Profile', 'icon': Icons.settings_outlined},
   ];
 
   static const List<Map<String, dynamic>> _gmTabs = [
-    {'id': 'dashboard', 'label': 'Dashboard', 'icon': Icons.home},
-    {'id': 'users', 'label': 'Users', 'icon': Icons.people},
-    {'id': 'reports', 'label': 'Reports', 'icon': Icons.description},
-    {'id': 'plans', 'label': 'Plans', 'icon': Icons.calendar_month},
-    {'id': 'profile', 'label': 'Profile', 'icon': Icons.settings},
+    {'id': 'dashboard', 'label': 'Dashboard', 'icon': Icons.home_outlined},
+    {'id': 'users', 'label': 'Users', 'icon': Icons.people_outline},
+    {'id': 'reports', 'label': 'Reports', 'icon': Icons.description_outlined},
+    {'id': 'plans', 'label': 'Plans', 'icon': Icons.calendar_month_outlined},
+    {'id': 'profile', 'label': 'Profile', 'icon': Icons.settings_outlined},
   ];
 }
-

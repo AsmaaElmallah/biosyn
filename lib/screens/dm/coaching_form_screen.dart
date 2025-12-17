@@ -783,27 +783,39 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
           style: const TextStyle(
             color: AppColors.gray700,
             fontSize: 16,
-            fontWeight: FontWeight.w500,
+            fontWeight: FontWeight.w600,
           ),
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
         LayoutBuilder(
           builder: (context, constraints) {
-            final buttonWidth = (constraints.maxWidth - (5 * 8)) / 6;
+            // Increased spacing from 8 to 12
+            final spacing = 12.0;
+            final buttonWidth = (constraints.maxWidth - (5 * spacing)) / 6;
             return Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: List.generate(6, (index) {
                 final rating = (index + 1).toString();
                 final isSelected = _formData[field] == rating;
-                return SizedBox(
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOutBack,
                   width: buttonWidth,
-                  child: Padding(
-                    padding: EdgeInsets.only(right: index < 5 ? 8 : 0),
+                  transform: isSelected 
+                      ? (Matrix4.identity()..scale(1.05))
+                      : Matrix4.identity(),
+                  transformAlignment: Alignment.center,
+                  child: Material(
+                    color: Colors.transparent,
                     child: InkWell(
                       onTap: () => _updateField(field, rating),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      borderRadius: BorderRadius.circular(14),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        // Increased vertical padding from 12 to 16
+                        padding: const EdgeInsets.symmetric(vertical: 16),
                         decoration: BoxDecoration(
                           gradient: isSelected
                               ? AppColors.primaryGradientHorizontal
@@ -812,29 +824,47 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
                           border: Border.all(
                             color: isSelected
                                 ? Colors.transparent
-                                : AppColors.gray200,
+                                : AppColors.gray300,
                             width: 2,
                           ),
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(14),
                           boxShadow: isSelected
                               ? [
                                   BoxShadow(
-                                    color: AppColors.primaryBlue.withOpacity(0.3),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 2),
+                                    color: AppColors.primaryBlue.withOpacity(0.4),
+                                    blurRadius: 12,
+                                    offset: const Offset(0, 4),
                                   ),
                                 ]
-                              : null,
+                              : [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.05),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
                         ),
-                        child: Text(
-                          rating,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: isSelected ? Colors.white : AppColors.gray700,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w500,
-                          ),
-                          overflow: TextOverflow.ellipsis,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              rating,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: isSelected ? Colors.white : AppColors.gray700,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            if (isSelected) ...[
+                              const SizedBox(height: 2),
+                              const Icon(
+                                Icons.check_circle,
+                                color: Colors.white,
+                                size: 14,
+                              ),
+                            ],
+                          ],
                         ),
                       ),
                     ),

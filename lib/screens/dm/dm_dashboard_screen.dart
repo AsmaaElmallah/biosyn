@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:biosyn_report_flutter/theme/colors.dart';
 import 'package:biosyn_report_flutter/widgets/bottom_nav.dart';
+import 'package:biosyn_report_flutter/widgets/app_header.dart';
 import 'package:biosyn_report_flutter/widgets/sync_status_indicator.dart';
 import 'package:biosyn_report_flutter/models/coaching_report.dart';
 import 'package:biosyn_report_flutter/utils/export_utils.dart';
@@ -262,43 +263,9 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
             Column(
               children: [
             // Header
-            Container(
-              decoration: const BoxDecoration(
-                gradient: AppColors.primaryGradient,
-                borderRadius: BorderRadius.only(
-                  bottomLeft: Radius.circular(24),
-                  bottomRight: Radius.circular(24),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black26,
-                    blurRadius: 10,
-                    offset: Offset(0, 4),
-                  ),
-                ],
-              ),
-              padding: const EdgeInsets.fromLTRB(24, 48, 24, 24),
-              child: Column(
-                children: [
-                  const Text(
-                    'Dashboard',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Your coaching performance overview',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 14,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
+            const AppHeader(
+              title: 'Dashboard',
+              subtitle: 'Your coaching performance overview',
             ),
             // Content
             Expanded(
@@ -628,78 +595,206 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                                 children: monthlyMRVisits.map((mr) {
                                   final visits = mr['visits'] as List<dynamic>;
                                   final visitCount = mr['visitCount'] as int;
+                                  final mrName = mr['mrName'] as String;
+                                  final avgScore = mr['averageScore'] as double;
+                                  // Get initials from name
+                                  final initials = mrName.split(' ')
+                                      .take(2)
+                                      .map((e) => e.isNotEmpty ? e[0].toUpperCase() : '')
+                                      .join();
+                                  // Score color based on value
+                                  final scoreColor = avgScore >= 5.0 ? AppColors.success 
+                                      : avgScore >= 4.0 ? AppColors.warning 
+                                      : AppColors.error;
+                                  
                                   return Container(
                                     margin: const EdgeInsets.only(bottom: 16),
-                                    padding: const EdgeInsets.all(16),
                                     decoration: BoxDecoration(
-                                      border: Border.all(color: AppColors.primaryCyan, width: 2),
-                                      borderRadius: BorderRadius.circular(12),
-                                      gradient: LinearGradient(
-                                        begin: Alignment.topLeft,
-                                        end: Alignment.bottomRight,
-                                        colors: [
-                                          AppColors.primaryCyan.withOpacity(0.1),
-                                          AppColors.primaryBlue.withOpacity(0.05),
-                                        ],
-                                      ),
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(16),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: AppColors.primaryBlue.withOpacity(0.08),
+                                          blurRadius: 15,
+                                          offset: const Offset(0, 4),
+                                        ),
+                                      ],
                                     ),
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        Row(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Expanded(
-                                              child: Column(
-                                                crossAxisAlignment: CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(
-                                                    mr['mrName'],
-                                                    style: const TextStyle(
-                                                      fontSize: 16,
-                                                      fontWeight: FontWeight.bold,
-                                                      color: AppColors.gray900,
-                                                    ),
-                                                  ),
-                                                  const SizedBox(height: 4),
-                                                  Text(
-                                                    'ID: ${mr['mrId']}',
-                                                    style: const TextStyle(
-                                                      color: AppColors.gray600,
-                                                      fontSize: 14,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                            Column(
-                                              crossAxisAlignment: CrossAxisAlignment.end,
-                                              children: [
-                                                const Text(
-                                                  'Visits',
-                                                  style: TextStyle(
-                                                    color: AppColors.gray600,
-                                                    fontSize: 12,
-                                                  ),
-                                                ),
-                                                Text(
-                                                  '${mr['visitCount']}',
-                                                  style: const TextStyle(
-                                                    fontSize: 24,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: AppColors.primaryBlue,
-                                                  ),
-                                                ),
-                                                Text(
-                                                  'Avg: ${mr['averageScore']}/6',
-                                                  style: const TextStyle(
-                                                    color: AppColors.gray600,
-                                                    fontSize: 12,
-                                                  ),
-                                                ),
+                                        // Header with gradient
+                                        Container(
+                                          padding: const EdgeInsets.all(16),
+                                          decoration: BoxDecoration(
+                                            gradient: LinearGradient(
+                                              begin: Alignment.topLeft,
+                                              end: Alignment.bottomRight,
+                                              colors: [
+                                                AppColors.primaryBlue.withOpacity(0.05),
+                                                AppColors.primaryCyan.withOpacity(0.1),
                                               ],
                                             ),
-                                          ],
+                                            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              // Avatar with initials
+                                              Container(
+                                                width: 50,
+                                                height: 50,
+                                                decoration: BoxDecoration(
+                                                  gradient: AppColors.primaryGradient,
+                                                  shape: BoxShape.circle,
+                                                  boxShadow: [
+                                                    BoxShadow(
+                                                      color: AppColors.primaryBlue.withOpacity(0.3),
+                                                      blurRadius: 8,
+                                                      offset: const Offset(0, 3),
+                                                    ),
+                                                  ],
+                                                ),
+                                                child: Center(
+                                                  child: Text(
+                                                    initials.isNotEmpty ? initials : 'MR',
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 18,
+                                                      fontWeight: FontWeight.bold,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 10),
+                                              // Name and role
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
+                                                      mrName,
+                                                      style: const TextStyle(
+                                                        fontSize: 15,
+                                                        fontWeight: FontWeight.bold,
+                                                        color: AppColors.gray900,
+                                                      ),
+                                                      overflow: TextOverflow.ellipsis,
+                                                      maxLines: 1,
+                                                    ),
+                                                    const SizedBox(height: 2),
+                                                    Row(
+                                                      children: [
+                                                        Icon(Icons.medical_services, 
+                                                            size: 11, color: AppColors.gray600),
+                                                        const SizedBox(width: 3),
+                                                        Flexible(
+                                                          child: Text(
+                                                            'Medical Rep',
+                                                            style: TextStyle(
+                                                              color: AppColors.gray600,
+                                                              fontSize: 11,
+                                                            ),
+                                                            overflow: TextOverflow.ellipsis,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              // Score badge
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                                decoration: BoxDecoration(
+                                                  color: scoreColor.withOpacity(0.15),
+                                                  borderRadius: BorderRadius.circular(16),
+                                                  border: Border.all(color: scoreColor.withOpacity(0.3)),
+                                                ),
+                                                child: Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    Icon(Icons.star, size: 12, color: scoreColor),
+                                                    const SizedBox(width: 3),
+                                                    Text(
+                                                      '${avgScore.toStringAsFixed(1)}',
+                                                      style: TextStyle(
+                                                        color: scoreColor,
+                                                        fontSize: 12,
+                                                        fontWeight: FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        // Stats row
+                                        Padding(
+                                          padding: const EdgeInsets.all(16),
+                                          child: Row(
+                                            children: [
+                                              // Visits count
+                                              Expanded(
+                                                child: Container(
+                                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                                  decoration: BoxDecoration(
+                                                    color: AppColors.primaryBlue.withOpacity(0.05),
+                                                    borderRadius: BorderRadius.circular(12),
+                                                  ),
+                                                  child: Column(
+                                                    children: [
+                                                      Text(
+                                                        '$visitCount',
+                                                        style: const TextStyle(
+                                                          fontSize: 24,
+                                                          fontWeight: FontWeight.bold,
+                                                          color: AppColors.primaryBlue,
+                                                        ),
+                                                      ),
+                                                      const Text(
+                                                        'Visits',
+                                                        style: TextStyle(
+                                                          color: AppColors.gray600,
+                                                          fontSize: 12,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 12),
+                                              // Average score
+                                              Expanded(
+                                                child: Container(
+                                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                                  decoration: BoxDecoration(
+                                                    color: scoreColor.withOpacity(0.05),
+                                                    borderRadius: BorderRadius.circular(12),
+                                                  ),
+                                                  child: Column(
+                                                    children: [
+                                                      Text(
+                                                        avgScore.toStringAsFixed(1),
+                                                        style: TextStyle(
+                                                          fontSize: 24,
+                                                          fontWeight: FontWeight.bold,
+                                                          color: scoreColor,
+                                                        ),
+                                                      ),
+                                                      const Text(
+                                                        'Avg Score',
+                                                        style: TextStyle(
+                                                          color: AppColors.gray600,
+                                                          fontSize: 12,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
                                         ),
                                         const SizedBox(height: 16),
                                         // Trend Chart
@@ -824,100 +919,91 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                                           ),
                                           const SizedBox(height: 16),
                                         ],
-                                        // Visits Grid
-                                        LayoutBuilder(
-                                          builder: (context, constraints) {
-                                            final availableWidth = constraints.maxWidth;
-                                            int crossAxisCount;
-                                            if (visitCount == 1) {
-                                              crossAxisCount = 1;
-                                            } else if (visitCount == 2) {
-                                              crossAxisCount = 2;
-                                            } else {
-                                              // Calculate based on available width
-                                              final itemWidth = 100.0; // Minimum width per item
-                                              crossAxisCount = (availableWidth / itemWidth).floor().clamp(1, 3);
-                                            }
-                                            
-                                            return GridView.builder(
-                                              shrinkWrap: true,
-                                              physics: const NeverScrollableScrollPhysics(),
-                                              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                                                crossAxisCount: crossAxisCount,
-                                                crossAxisSpacing: 8,
-                                                mainAxisSpacing: 8,
-                                                childAspectRatio: 1.2,
-                                              ),
-                                              itemCount: visits.length,
-                                              itemBuilder: (context, index) {
-                                                final visit = visits[index];
-                                                return Container(
-                                                  padding: const EdgeInsets.all(8),
-                                                  decoration: BoxDecoration(
-                                                    color: Colors.white,
-                                                    borderRadius: BorderRadius.circular(8),
-                                                    border: Border.all(color: AppColors.gray200),
-                                                  ),
-                                                  child: Column(
-                                                    mainAxisAlignment: MainAxisAlignment.center,
-                                                    mainAxisSize: MainAxisSize.min,
-                                                    children: [
-                                                      Flexible(
-                                                        child: Text(
-                                                          'Visit ${index + 1}',
-                                                          style: const TextStyle(
-                                                            color: AppColors.gray600,
-                                                            fontSize: 10,
-                                                          ),
-                                                          overflow: TextOverflow.ellipsis,
-                                                          maxLines: 1,
-                                                        ),
-                                                      ),
-                                                      const SizedBox(height: 4),
-                                                      Flexible(
-                                                        child: Text(
-                                                          DateFormat('MMM dd').format(DateTime.parse(visit['date'])),
-                                                          style: const TextStyle(
-                                                            color: AppColors.gray600,
-                                                            fontSize: 10,
-                                                          ),
-                                                          overflow: TextOverflow.ellipsis,
-                                                          maxLines: 1,
-                                                        ),
-                                                      ),
-                                                      const SizedBox(height: 4),
-                                                      Row(
-                                                        mainAxisAlignment: MainAxisAlignment.center,
-                                                        crossAxisAlignment: CrossAxisAlignment.baseline,
-                                                        textBaseline: TextBaseline.alphabetic,
-                                                        mainAxisSize: MainAxisSize.min,
-                                                        children: [
-                                                          Flexible(
-                                                            child: Text(
-                                                              visit['score'].toString(),
-                                                              style: const TextStyle(
-                                                                fontSize: 16,
-                                                                fontWeight: FontWeight.bold,
-                                                                color: AppColors.primaryBlue,
-                                                              ),
-                                                              overflow: TextOverflow.ellipsis,
-                                                            ),
-                                                          ),
-                                                          const Text(
-                                                            '/6',
-                                                            style: TextStyle(
-                                                              color: AppColors.gray600,
-                                                              fontSize: 10,
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ),
+                                        // Visits - Compact horizontal list
+                                        SizedBox(
+                                          height: 80,
+                                          child: ListView.builder(
+                                            scrollDirection: Axis.horizontal,
+                                            itemCount: visits.length,
+                                            itemBuilder: (context, index) {
+                                              final visit = visits[index];
+                                              final vScore = visit['score'] as double;
+                                              final vScoreColor = vScore >= 5.0 ? AppColors.success 
+                                                  : vScore >= 4.0 ? AppColors.warning 
+                                                  : AppColors.error;
+                                              return Container(
+                                                width: 100,
+                                                margin: EdgeInsets.only(right: index < visits.length - 1 ? 10 : 0),
+                                                decoration: BoxDecoration(
+                                                  gradient: LinearGradient(
+                                                    begin: Alignment.topLeft,
+                                                    end: Alignment.bottomRight,
+                                                    colors: [
+                                                      vScoreColor.withOpacity(0.08),
+                                                      vScoreColor.withOpacity(0.15),
                                                     ],
                                                   ),
-                                                );
-                                              },
-                                            );
-                                          },
+                                                  borderRadius: BorderRadius.circular(12),
+                                                  border: Border.all(color: vScoreColor.withOpacity(0.3)),
+                                                ),
+                                                child: Column(
+                                                  mainAxisAlignment: MainAxisAlignment.center,
+                                                  children: [
+                                                    // Visit number badge
+                                                    Container(
+                                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                                      decoration: BoxDecoration(
+                                                        color: vScoreColor.withOpacity(0.2),
+                                                        borderRadius: BorderRadius.circular(8),
+                                                      ),
+                                                      child: Text(
+                                                        'Visit ${index + 1}',
+                                                        style: TextStyle(
+                                                          color: vScoreColor,
+                                                          fontSize: 10,
+                                                          fontWeight: FontWeight.w600,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    const SizedBox(height: 4),
+                                                    // Date
+                                                    Text(
+                                                      DateFormat('MMM dd').format(DateTime.parse(visit['date'])),
+                                                      style: const TextStyle(
+                                                        color: AppColors.gray600,
+                                                        fontSize: 10,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(height: 2),
+                                                    // Score
+                                                    Row(
+                                                      mainAxisAlignment: MainAxisAlignment.center,
+                                                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                                                      textBaseline: TextBaseline.alphabetic,
+                                                      mainAxisSize: MainAxisSize.min,
+                                                      children: [
+                                                        Text(
+                                                          vScore.toStringAsFixed(1),
+                                                          style: TextStyle(
+                                                            fontSize: 18,
+                                                            fontWeight: FontWeight.bold,
+                                                            color: vScoreColor,
+                                                          ),
+                                                        ),
+                                                        Text(
+                                                          '/6',
+                                                          style: TextStyle(
+                                                            color: AppColors.gray600,
+                                                            fontSize: 10,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ],
+                                                ),
+                                              );
+                                            },
+                                          ),
                                         ),
                                         const SizedBox(height: 12),
                                         const Divider(),
@@ -1031,15 +1117,27 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                                         Row(
                                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                           children: [
-                                            Flexible(
-                                              child: Text(
-                                                'ID: ${report.mrId.length > 20 ? "${report.mrId.substring(0, 20)}..." : report.mrId}',
-                                                style: const TextStyle(
-                                                  color: AppColors.gray600,
-                                                  fontSize: 14,
-                                                ),
-                                                overflow: TextOverflow.ellipsis,
-                                                maxLines: 1,
+                                            // Score badge
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                              decoration: BoxDecoration(
+                                                color: AppColors.primaryBlue.withOpacity(0.1),
+                                                borderRadius: BorderRadius.circular(12),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(Icons.star, size: 14, color: AppColors.primaryBlue),
+                                                  const SizedBox(width: 4),
+                                                  Text(
+                                                    '${report.getAverageScore().toStringAsFixed(1)}/6',
+                                                    style: const TextStyle(
+                                                      color: AppColors.primaryBlue,
+                                                      fontSize: 12,
+                                                      fontWeight: FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
                                             ),
                                             Container(
@@ -1048,13 +1146,20 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                                                 color: AppColors.success.withOpacity(0.1),
                                                 borderRadius: BorderRadius.circular(20),
                                               ),
-                                              child: const Text(
-                                                'Completed',
-                                                style: TextStyle(
-                                                  color: AppColors.success,
-                                                  fontSize: 12,
-                                                  fontWeight: FontWeight.w500,
-                                                ),
+                                              child: const Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(Icons.check_circle, size: 12, color: AppColors.success),
+                                                  SizedBox(width: 4),
+                                                  Text(
+                                                    'Completed',
+                                                    style: TextStyle(
+                                                      color: AppColors.success,
+                                                      fontSize: 12,
+                                                      fontWeight: FontWeight.w500,
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
                                             ),
                                           ],
@@ -1329,6 +1434,15 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
 
   Widget _buildReportModal(BuildContext context, CoachingReport report) {
     final avgScore = _calculateAvgScore(report);
+    final scorePercent = (avgScore / 6.0 * 100).clamp(0, 100);
+    final scoreColor = avgScore >= 5.0 ? AppColors.success 
+        : avgScore >= 4.0 ? AppColors.warning 
+        : AppColors.error;
+    // Get initials from name
+    final initials = report.mrName.split(' ')
+        .take(2)
+        .map((e) => e.isNotEmpty ? e[0].toUpperCase() : '')
+        .join();
     
     return Container(
       color: Colors.black54,
@@ -1342,7 +1456,7 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
               margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(20),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withOpacity(0.3),
@@ -1353,38 +1467,134 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
               ),
               child: Material(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(20),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                // Modal Header
+                // Modal Header - Enhanced with Score
                 Container(
                   decoration: const BoxDecoration(
                     gradient: AppColors.primaryGradientHorizontal,
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
                   ),
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
                   child: Column(
                     children: [
-                      const Text(
-                        'Coaching Report Details',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        report.mrName,
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.9),
-                          fontSize: 14,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                        maxLines: 1,
-                        textAlign: TextAlign.center,
+                      Row(
+                        children: [
+                          // Avatar
+                          Container(
+                            width: 56,
+                            height: 56,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.1),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: Center(
+                              child: Text(
+                                initials.isNotEmpty ? initials : 'MR',
+                                style: const TextStyle(
+                                  color: AppColors.primaryBlue,
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          // Name and title
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Coaching Report',
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  report.mrName,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  report.date,
+                                  style: TextStyle(
+                                    color: Colors.white.withOpacity(0.8),
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          // Score circle
+                          Container(
+                            width: 60,
+                            height: 60,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: scoreColor.withOpacity(0.3),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 3),
+                                ),
+                              ],
+                            ),
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                SizedBox(
+                                  width: 52,
+                                  height: 52,
+                                  child: CircularProgressIndicator(
+                                    value: scorePercent / 100,
+                                    strokeWidth: 4,
+                                    backgroundColor: AppColors.gray200,
+                                    valueColor: AlwaysStoppedAnimation<Color>(scoreColor),
+                                  ),
+                                ),
+                                Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      avgScore.toStringAsFixed(1),
+                                      style: TextStyle(
+                                        color: scoreColor,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    Text(
+                                      '/6',
+                                      style: TextStyle(
+                                        color: AppColors.gray600,
+                                        fontSize: 9,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -1403,7 +1613,7 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                             _buildModalInfoItem('Date', report.date),
                             _buildModalInfoItem('Average Score', '${avgScore.toStringAsFixed(2)} / 6.0'),
                             _buildModalInfoItem('District Manager', report.dmName),
-                            _buildModalInfoItem('Medical Rep ID', report.mrId),
+                            _buildModalInfoItem('Medical Rep', report.mrName),
                           ],
                         ),
                         const SizedBox(height: 24),

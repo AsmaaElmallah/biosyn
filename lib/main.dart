@@ -429,16 +429,18 @@ class _AppNavigatorState extends State<AppNavigator> {
           },
           onExport: (reportId) async {
             try {
-              if (reportId != null) {
+              if (reportId != null && _reports.isNotEmpty) {
                 // Export single report
                 final report = _reports.firstWhere(
                   (r) => (r.mrId + r.date) == reportId,
                   orElse: () => _reports.first,
                 );
                 await ExportUtils.exportSingleReportToText(report);
-              } else {
+              } else if (_reports.isNotEmpty) {
                 // Export monthly report
                 await ExportUtils.exportMonthlyReport(_reports, _userName);
+              } else {
+                throw Exception('No reports to export');
               }
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -488,16 +490,18 @@ class _AppNavigatorState extends State<AppNavigator> {
           reports: _reports,
           onExport: (reportId) async {
             try {
-              if (reportId != null) {
+              if (reportId != null && _reports.isNotEmpty) {
                 // Export single report
                 final report = _reports.firstWhere(
                   (r) => (r.mrId + r.date) == reportId,
                   orElse: () => _reports.first,
                 );
                 await ExportUtils.exportSingleReportToText(report);
-              } else {
+              } else if (_reports.isNotEmpty) {
                 // Export all reports
                 await ExportUtils.exportAllReportsToText(_reports);
+              } else {
+                throw Exception('No reports to export');
               }
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
