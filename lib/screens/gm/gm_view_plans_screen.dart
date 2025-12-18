@@ -79,15 +79,26 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
         return;
       }
       
-      // Fetch DMs and Plans from Supabase
+      // Fetch all coaches (DM, FT, PM, MSL) and Plans from Supabase
       final dms = await SupabaseService.getAllDMs();
+      final fts = await SupabaseService.getAllFTs();
+      final pms = await SupabaseService.getAllPMs();
+      final msls = await SupabaseService.getAllMSLs();
       final plans = await SupabaseService.getAllPlans();
       
-      debugPrint('   ✅ Loaded ${dms.length} DMs');
+      // Combine all coaches
+      final allCoaches = [
+        ...dms.map((dm) => {...dm, 'role': 'dm'}),
+        ...fts.map((ft) => {...ft, 'role': 'ft'}),
+        ...pms.map((pm) => {...pm, 'role': 'pm'}),
+        ...msls.map((msl) => {...msl, 'role': 'msl'}),
+      ];
+      
+      debugPrint('   ✅ Loaded ${allCoaches.length} Coaches (${dms.length} DMs, ${fts.length} FTs, ${pms.length} PMs, ${msls.length} MSLs)');
       debugPrint('   ✅ Loaded ${plans.length} Plans');
       
       setState(() {
-        _allDMs = dms;
+        _allDMs = allCoaches;
         _allPlans = plans;
         _isLoading = false;
       });

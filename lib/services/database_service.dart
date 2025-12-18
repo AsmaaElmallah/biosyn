@@ -108,9 +108,11 @@ class DatabaseService {
   // ==================== Reports Operations ====================
 
   /// Save report
+  /// Note: reportId now includes coachRole to allow multiple reports with same MR and date but different coach roles
   static Future<void> saveReport(CoachingReport report, {bool synced = false}) async {
     final db = await database;
-    final reportId = '${report.mrId}_${report.date}';
+    // Include coachRole in reportId to differentiate between DM/FT/PM/MSL reports with same MR and date
+    final reportId = '${report.mrId}_${report.date}_${report.coachRole ?? 'null'}';
     
     await db.insert(
       'reports',

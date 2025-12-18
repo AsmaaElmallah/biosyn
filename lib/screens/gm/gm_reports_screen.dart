@@ -32,8 +32,14 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
   CoachingReport? _selectedReport;
 
   List<String> get _uniqueDMs {
+    // Include coach name with role for PM/MSL
     return widget.reports
-        .map((r) => r.dmName)
+        .map((r) {
+          if (r.coachRole != null && r.coachRole!.isNotEmpty) {
+            return '${r.dmName} (${r.coachRole!.toUpperCase()})';
+          }
+          return r.dmName;
+        })
         .where((name) => name.isNotEmpty)
         .toSet()
         .toList();
@@ -52,9 +58,14 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
       final matchesSearch = _searchController.text.isEmpty ||
           report.mrName.toLowerCase().contains(_searchController.text.toLowerCase()) ||
           report.dmName.toLowerCase().contains(_searchController.text.toLowerCase()) ||
-          report.mrId.contains(_searchController.text);
+          report.mrId.contains(_searchController.text) ||
+          (report.coachRole != null && report.coachRole!.toLowerCase().contains(_searchController.text.toLowerCase()));
 
-      final matchesDM = _selectedDM == 'all' || report.dmName == _selectedDM;
+      // Match DM/Coach name with role
+      final reportCoachName = report.coachRole != null && report.coachRole!.isNotEmpty
+          ? '${report.dmName} (${report.coachRole!.toUpperCase()})'
+          : report.dmName;
+      final matchesDM = _selectedDM == 'all' || reportCoachName == _selectedDM;
       final matchesMR = _selectedMR == 'all' || report.mrName == _selectedMR;
 
       bool matchesDate = true;

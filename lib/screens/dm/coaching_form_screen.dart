@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:biosyn_report_flutter/theme/colors.dart';
 import 'package:biosyn_report_flutter/models/coaching_report.dart';
+import 'package:geolocator/geolocator.dart';
 
 class CoachingFormScreen extends StatefulWidget {
   final String date;
@@ -8,6 +9,7 @@ class CoachingFormScreen extends StatefulWidget {
   final String mrName;
   final String dmId;
   final String dmName;
+  final String coachRole; // 'dm' or 'ft'
   final Function(CoachingReport) onSubmit;
   final VoidCallback onBack;
 
@@ -18,6 +20,7 @@ class CoachingFormScreen extends StatefulWidget {
     required this.mrName,
     required this.dmId,
     required this.dmName,
+    required this.coachRole, // 'dm' or 'ft'
     required this.onSubmit,
     required this.onBack,
   });
@@ -42,6 +45,12 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
   // Text controllers for text areas (to prevent RTL issues)
   late final TextEditingController _strengthsController;
   late final TextEditingController _improvementsController;
+  late final TextEditingController _brickNameController;
+  late final TextEditingController _doctorsVisitedController;
+
+  // Location
+  Position? _currentPosition;
+  bool _locationLoading = false;
 
   @override
   void initState() {
@@ -55,13 +64,81 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
     // Initialize text controllers
     _strengthsController = TextEditingController();
     _improvementsController = TextEditingController();
+    _brickNameController = TextEditingController();
+    _doctorsVisitedController = TextEditingController();
   }
 
   @override
   void dispose() {
     _strengthsController.dispose();
     _improvementsController.dispose();
+    _brickNameController.dispose();
+    _doctorsVisitedController.dispose();
     super.dispose();
+  }
+
+  Future<void> _getCurrentLocation() async {
+    setState(() => _locationLoading = true);
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Location services are disabled')),
+          );
+        }
+        setState(() => _locationLoading = false);
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Location permissions are denied')),
+            );
+          }
+          setState(() => _locationLoading = false);
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Location permissions are permanently denied')),
+          );
+        }
+        setState(() => _locationLoading = false);
+        return;
+      }
+
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      setState(() {
+        _currentPosition = position;
+        _formData['brickLocationLat'] = position.latitude.toString();
+        _formData['brickLocationLng'] = position.longitude.toString();
+        _locationLoading = false;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Location captured: ${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}')),
+        );
+      }
+    } catch (e) {
+      setState(() => _locationLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to get location: $e')),
+        );
+      }
+    }
   }
 
   void _updateField(String field, String value) {
@@ -128,6 +205,13 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
       dmName: _formData['dmName']!,
       mrId: _formData['mrId']!,
       mrName: _formData['mrName']!,
+      coachRole: widget.coachRole, // 'dm' or 'ft'
+      // Brick Information
+      brickName: _brickNameController.text.trim().isNotEmpty ? _brickNameController.text.trim() : null,
+      brickLocationLat: _formData['brickLocationLat'] != null ? double.tryParse(_formData['brickLocationLat']!) : null,
+      brickLocationLng: _formData['brickLocationLng'] != null ? double.tryParse(_formData['brickLocationLng']!) : null,
+      visitCount: _formData['visitCount'] != null ? int.tryParse(_formData['visitCount']!) : 1,
+      doctorsVisited: _doctorsVisitedController.text.trim().isNotEmpty ? _doctorsVisitedController.text.trim() : null,
       punctuality: _formData['punctuality'],
       dressCode: _formData['dressCode'],
       timeManagement: _formData['timeManagement'],
@@ -483,6 +567,121 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
           label: 'Medical Representative (MR)',
           value: '${widget.mrName} - ${widget.mrId}',
           enabled: false,
+        ),
+        const SizedBox(height: 24),
+        // Brick Name
+        TextField(
+          controller: _brickNameController,
+          onChanged: (value) => _updateField('brickName', value),
+          decoration: InputDecoration(
+            labelText: 'Brick Name',
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.primaryCyan, width: 2),
+            ),
+            filled: true,
+            fillColor: Colors.white,
+          ),
+        ),
+        const SizedBox(height: 24),
+        // Location Picker
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppColors.gray200, width: 2),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Brick Location',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.gray700,
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (_currentPosition != null)
+                Text(
+                  'Lat: ${_currentPosition!.latitude.toStringAsFixed(6)}, Lng: ${_currentPosition!.longitude.toStringAsFixed(6)}',
+                  style: const TextStyle(color: AppColors.gray600),
+                ),
+              const SizedBox(height: 12),
+              ElevatedButton.icon(
+                onPressed: _locationLoading ? null : _getCurrentLocation,
+                icon: _locationLoading
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.location_on),
+                label: Text(_locationLoading ? 'Getting Location...' : 'Get Current Location'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primaryBlue,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+        // Doctors Visited
+        TextField(
+          controller: _doctorsVisitedController,
+          decoration: InputDecoration(
+            labelText: 'Doctors Visited (comma-separated)',
+            hintText: 'Dr. Ahmed, Dr. Mohamed, ...',
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.primaryCyan, width: 2),
+            ),
+            filled: true,
+            fillColor: Colors.white,
+          ),
+        ),
+        const SizedBox(height: 24),
+        // Visit Count
+        TextField(
+          keyboardType: TextInputType.number,
+          onChanged: (value) => _updateField('visitCount', value),
+          decoration: InputDecoration(
+            labelText: 'Visit Count',
+            hintText: '1',
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.primaryCyan, width: 2),
+            ),
+            filled: true,
+            fillColor: Colors.white,
+          ),
         ),
       ],
     );

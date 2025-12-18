@@ -64,11 +64,18 @@ class WelcomeScreen extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 32),
-                        // District Manager Button
+                        // District Manager / Field Trainer Button
                         _buildPrimaryButton(
-                          text: 'Login as District Manager',
+                          text: 'Login as District Manager / Field Trainer',
                           icon: Icons.person_outline,
                           onPressed: () => onSelectRole('dm'),
+                        ),
+                        const SizedBox(height: 16),
+                        // Product Manager / Medical Science Liaison Button
+                        _buildPrimaryButton(
+                          text: 'Login as Product Manager / Medical Science Liaison',
+                          icon: Icons.medical_services_outlined,
+                          onPressed: () => onSelectRole('pm'),
                         ),
                         const SizedBox(height: 16),
                         // General Manager Button

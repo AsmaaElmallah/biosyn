@@ -3,6 +3,8 @@ import 'package:biosyn_report_flutter/theme/colors.dart';
 import 'package:biosyn_report_flutter/widgets/bottom_nav.dart';
 import 'package:biosyn_report_flutter/widgets/app_header.dart';
 import 'package:biosyn_report_flutter/services/supabase_service.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
 
 class User {
   final String id;
@@ -10,6 +12,7 @@ class User {
   final String username;
   final String role;
   final String status;
+  final String? profilePictureUrl; // Profile picture URL from Supabase
 
   User({
     required this.id,
@@ -17,6 +20,7 @@ class User {
     required this.username,
     required this.role,
     required this.status,
+    this.profilePictureUrl,
   });
 }
 
@@ -37,6 +41,9 @@ class UserManagementScreen extends StatefulWidget {
 class _UserManagementScreenState extends State<UserManagementScreen> {
   String _activeTab = 'dm';
   final List<User> _dms = [];
+  final List<User> _fts = [];
+  final List<User> _pms = [];
+  final List<User> _msls = [];
   final List<User> _mrs = [];
   final _searchController = TextEditingController();
   bool _showModal = false;
@@ -48,8 +55,26 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   final _passwordController = TextEditingController();
   bool _isLoading = false;
   String? _errorMessage;
+  File? _profileImage;
+  String? _profileImageUrl;
+  final ImagePicker _imagePicker = ImagePicker();
 
-  List<User> get _currentUsers => _activeTab == 'dm' ? _dms : _mrs;
+  List<User> get _currentUsers {
+    switch (_activeTab) {
+      case 'dm':
+        return _dms;
+      case 'ft':
+        return _fts;
+      case 'pm':
+        return _pms;
+      case 'msl':
+        return _msls;
+      case 'mr':
+        return _mrs;
+      default:
+        return _dms;
+    }
+  }
 
   List<User> get _filteredUsers {
     final query = _searchController.text.toLowerCase();
@@ -73,6 +98,9 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
 
     try {
       final dmsData = await SupabaseService.getAllDMs();
+      final ftsData = await SupabaseService.getAllFTs();
+      final pmsData = await SupabaseService.getAllPMs();
+      final mslsData = await SupabaseService.getAllMSLs();
       final mrsData = await SupabaseService.getAllMRs();
 
       setState(() {
@@ -84,6 +112,40 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                 username: (u['username'] ?? '').toString(),
                 role: (u['role'] ?? '').toString(),
                 status: (u['status'] ?? '').toString(),
+                profilePictureUrl: u['profile_picture_url']?.toString(),
+              )));
+
+        _fts
+          ..clear()
+          ..addAll(ftsData.map((u) => User(
+                id: (u['id'] ?? '').toString(),
+                name: (u['name'] ?? '').toString(),
+                username: (u['username'] ?? '').toString(),
+                role: (u['role'] ?? '').toString(),
+                status: (u['status'] ?? '').toString(),
+                profilePictureUrl: u['profile_picture_url']?.toString(),
+              )));
+
+        _pms
+          ..clear()
+          ..addAll(pmsData.map((u) => User(
+                id: (u['id'] ?? '').toString(),
+                name: (u['name'] ?? '').toString(),
+                username: (u['username'] ?? '').toString(),
+                role: (u['role'] ?? '').toString(),
+                status: (u['status'] ?? '').toString(),
+                profilePictureUrl: u['profile_picture_url']?.toString(),
+              )));
+
+        _msls
+          ..clear()
+          ..addAll(mslsData.map((u) => User(
+                id: (u['id'] ?? '').toString(),
+                name: (u['name'] ?? '').toString(),
+                username: (u['username'] ?? '').toString(),
+                role: (u['role'] ?? '').toString(),
+                status: (u['status'] ?? '').toString(),
+                profilePictureUrl: u['profile_picture_url']?.toString(),
               )));
 
         _mrs
@@ -94,6 +156,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                 username: (u['username'] ?? '').toString(),
                 role: (u['role'] ?? '').toString(),
                 status: (u['status'] ?? '').toString(),
+                profilePictureUrl: u['profile_picture_url']?.toString(),
               )));
       });
     } catch (e) {
@@ -116,8 +179,33 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
       _nameController.clear();
       _usernameController.clear();
       _passwordController.clear();
+      _profileImage = null;
+      _profileImageUrl = null;
       _showModal = true;
     });
+  }
+
+  Future<void> _pickImage() async {
+    try {
+      final XFile? image = await _imagePicker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 800,
+        maxHeight: 800,
+        imageQuality: 85,
+      );
+      if (image != null) {
+        setState(() {
+          _profileImage = File(image.path);
+          _profileImageUrl = null; // Clear old URL when new image is picked
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to pick image: $e')),
+        );
+      }
+    }
   }
 
   void _handleEdit(User user) {
@@ -127,6 +215,8 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
       _nameController.text = user.name;
       _usernameController.text = user.username;
       _passwordController.clear();
+      _profileImage = null;
+      _profileImageUrl = user.profilePictureUrl; // Load profile picture URL from user
       _showModal = true;
     });
   }
@@ -168,9 +258,33 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
 
     setState(() {
       _errorMessage = null;
+      _isLoading = true;
     });
 
     try {
+      String? profilePictureUrl;
+
+      // Upload profile picture if selected
+      if (_profileImage != null) {
+        String userId;
+        if (_editingUser != null) {
+          userId = _editingUser!.id;
+        } else {
+          // For new user, we need to create user first to get ID
+          final response = await SupabaseService.signUp(
+            username: _usernameController.text.trim(),
+            password: _passwordController.text,
+            name: _nameController.text.trim(),
+            role: _activeTab,
+          );
+          userId = (response['id'] ?? '').toString();
+          _idController.text = userId;
+        }
+
+        // Upload image
+        profilePictureUrl = await SupabaseService.uploadProfilePicture(_profileImage!, userId);
+      }
+
       if (_editingUser != null) {
         // Update existing user in Supabase
         await SupabaseService.updateUser(
@@ -179,17 +293,16 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
           username: _usernameController.text.trim(),
           password: _passwordController.text.isNotEmpty ? _passwordController.text : null,
           role: _activeTab,
+          profilePictureUrl: profilePictureUrl,
         );
-      } else {
-        // Create new user in Supabase
+      } else if (_profileImage == null) {
+        // Create new user without image
         final response = await SupabaseService.signUp(
           username: _usernameController.text.trim(),
           password: _passwordController.text,
           name: _nameController.text.trim(),
           role: _activeTab,
         );
-
-        // Use Supabase-generated ID
         _idController.text = (response['id'] ?? '').toString();
       }
 
@@ -202,10 +315,14 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         _nameController.clear();
         _usernameController.clear();
         _passwordController.clear();
+        _profileImage = null;
+        _profileImageUrl = null;
+        _isLoading = false;
       });
     } catch (e) {
       setState(() {
         _errorMessage = 'Failed to save user: ${e.toString()}';
+        _isLoading = false;
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -260,68 +377,21 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                             ),
                           ],
                         ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: InkWell(
-                                onTap: () {
-                                  setState(() {
-                                    _activeTab = 'dm';
-                                    _searchController.clear();
-                                  });
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(vertical: 12),
-                                  decoration: BoxDecoration(
-                                    gradient: _activeTab == 'dm'
-                                        ? AppColors.primaryGradientHorizontal
-                                        : null,
-                                    color: _activeTab == 'dm' ? null : Colors.transparent,
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Text(
-                                    'District Managers (${_dms.length})',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      color: _activeTab == 'dm' ? Colors.white : AppColors.gray600,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: InkWell(
-                                onTap: () {
-                                  setState(() {
-                                    _activeTab = 'mr';
-                                    _searchController.clear();
-                                  });
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(vertical: 12),
-                                  decoration: BoxDecoration(
-                                    gradient: _activeTab == 'mr'
-                                        ? AppColors.primaryGradientHorizontal
-                                        : null,
-                                    color: _activeTab == 'mr' ? null : Colors.transparent,
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Text(
-                                    'Medical Reps (${_mrs.length})',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      color: _activeTab == 'mr' ? Colors.white : AppColors.gray600,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              _buildTabButton('dm', 'DM', _dms.length),
+                              const SizedBox(width: 8),
+                              _buildTabButton('ft', 'FT', _fts.length),
+                              const SizedBox(width: 8),
+                              _buildTabButton('pm', 'PM', _pms.length),
+                              const SizedBox(width: 8),
+                              _buildTabButton('msl', 'MSL', _msls.length),
+                              const SizedBox(width: 8),
+                              _buildTabButton('mr', 'MR', _mrs.length),
+                            ],
+                          ),
                         ),
                       ),
                       const SizedBox(height: 24),
@@ -469,31 +539,86 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                                         padding: const EdgeInsets.all(16),
                                         child: Row(
                                           children: [
-                                            // Avatar
-                                            Container(
-                                              width: 56,
-                                              height: 56,
-                                              decoration: BoxDecoration(
-                                                gradient: _activeTab == 'dm' 
-                                                    ? AppColors.primaryGradient
-                                                    : const LinearGradient(
-                                                        colors: [Color(0xFF10B981), Color(0xFF059669)],
+                                            // Avatar - Show profile picture from Supabase if available
+                                            user.profilePictureUrl != null && user.profilePictureUrl!.isNotEmpty
+                                                ? ClipOval(
+                                                    child: Image.network(
+                                                      user.profilePictureUrl!,
+                                                      width: 56,
+                                                      height: 56,
+                                                      fit: BoxFit.cover,
+                                                      errorBuilder: (context, error, stackTrace) {
+                                                        // Fallback to initials if image fails to load
+                                                        return Container(
+                                                          width: 56,
+                                                          height: 56,
+                                                          decoration: BoxDecoration(
+                                                            gradient: _activeTab == 'dm' 
+                                                                ? AppColors.primaryGradient
+                                                                : const LinearGradient(
+                                                                    colors: [Color(0xFF10B981), Color(0xFF059669)],
+                                                                  ),
+                                                            shape: BoxShape.circle,
+                                                          ),
+                                                          child: Center(
+                                                            child: Text(
+                                                              user.name.isNotEmpty 
+                                                                  ? user.name.split(' ').take(2).map((e) => e.isNotEmpty ? e[0].toUpperCase() : '').join()
+                                                                  : 'U',
+                                                              style: const TextStyle(
+                                                                color: Colors.white,
+                                                                fontSize: 20,
+                                                                fontWeight: FontWeight.bold,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        );
+                                                      },
+                                                      loadingBuilder: (context, child, loadingProgress) {
+                                                        if (loadingProgress == null) return child;
+                                                        return Container(
+                                                          width: 56,
+                                                          height: 56,
+                                                          decoration: BoxDecoration(
+                                                            color: AppColors.gray200,
+                                                            shape: BoxShape.circle,
+                                                          ),
+                                                          child: Center(
+                                                            child: CircularProgressIndicator(
+                                                              value: loadingProgress.expectedTotalBytes != null
+                                                                  ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                                                                  : null,
+                                                              strokeWidth: 2,
+                                                            ),
+                                                          ),
+                                                        );
+                                                      },
+                                                    ),
+                                                  )
+                                                : Container(
+                                                    width: 56,
+                                                    height: 56,
+                                                    decoration: BoxDecoration(
+                                                      gradient: _activeTab == 'dm' 
+                                                          ? AppColors.primaryGradient
+                                                          : const LinearGradient(
+                                                              colors: [Color(0xFF10B981), Color(0xFF059669)],
+                                                            ),
+                                                      shape: BoxShape.circle,
+                                                    ),
+                                                    child: Center(
+                                                      child: Text(
+                                                        user.name.isNotEmpty 
+                                                            ? user.name.split(' ').take(2).map((e) => e.isNotEmpty ? e[0].toUpperCase() : '').join()
+                                                            : 'U',
+                                                        style: const TextStyle(
+                                                          color: Colors.white,
+                                                          fontSize: 20,
+                                                          fontWeight: FontWeight.bold,
+                                                        ),
                                                       ),
-                                                shape: BoxShape.circle,
-                                              ),
-                                              child: Center(
-                                                child: Text(
-                                                  user.name.isNotEmpty 
-                                                      ? user.name.split(' ').take(2).map((e) => e.isNotEmpty ? e[0].toUpperCase() : '').join()
-                                                      : 'U',
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 20,
-                                                    fontWeight: FontWeight.bold,
+                                                    ),
                                                   ),
-                                                ),
-                                              ),
-                                            ),
                                             const SizedBox(width: 16),
                                             // User Details
                                             Expanded(
@@ -681,6 +806,35 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     );
   }
 
+  Widget _buildTabButton(String tab, String label, int count) {
+    final isActive = _activeTab == tab;
+    return InkWell(
+      onTap: () {
+        setState(() {
+          _activeTab = tab;
+          _searchController.clear();
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+        decoration: BoxDecoration(
+          gradient: isActive ? AppColors.primaryGradientHorizontal : null,
+          color: isActive ? null : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          '$label ($count)',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: isActive ? Colors.white : AppColors.gray600,
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildCard({required Widget child}) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -753,6 +907,75 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        // Profile Picture
+                        Center(
+                          child: Column(
+                            children: [
+                              GestureDetector(
+                                onTap: _pickImage,
+                                child: Container(
+                                  width: 100,
+                                  height: 100,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    gradient: _profileImage != null || _profileImageUrl != null
+                                        ? null
+                                        : AppColors.primaryGradient,
+                                    color: _profileImage != null || _profileImageUrl != null
+                                        ? Colors.transparent
+                                        : null,
+                                    border: Border.all(
+                                      color: AppColors.primaryCyan,
+                                      width: 3,
+                                    ),
+                                  ),
+                                  child: _profileImage != null
+                                      ? ClipOval(
+                                          child: Image.file(
+                                            _profileImage!,
+                                            fit: BoxFit.cover,
+                                          ),
+                                        )
+                                      : _profileImageUrl != null
+                                          ? ClipOval(
+                                              child: Image.network(
+                                                _profileImageUrl!,
+                                                fit: BoxFit.cover,
+                                                errorBuilder: (context, error, stackTrace) {
+                                                  return Container(
+                                                    decoration: BoxDecoration(
+                                                      gradient: AppColors.primaryGradient,
+                                                      shape: BoxShape.circle,
+                                                    ),
+                                                    child: const Icon(
+                                                      Icons.person,
+                                                      color: Colors.white,
+                                                      size: 50,
+                                                    ),
+                                                  );
+                                                },
+                                              ),
+                                            )
+                                          : const Icon(
+                                              Icons.add_photo_alternate,
+                                              color: Colors.white,
+                                              size: 40,
+                                            ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              TextButton.icon(
+                                onPressed: _pickImage,
+                                icon: const Icon(Icons.camera_alt, size: 18),
+                                label: const Text('Add Profile Picture'),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: AppColors.primaryBlue,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 24),
                         TextFormField(
                           controller: _idController,
                           enabled: _editingUser == null,

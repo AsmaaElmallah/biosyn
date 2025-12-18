@@ -27,7 +27,16 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _error;
 
   String get _roleTitle {
-    return widget.role == 'dm' ? 'District Manager' : 'General Manager';
+    switch (widget.role.toLowerCase()) {
+      case 'dm':
+        return 'District Manager / Field Trainer';
+      case 'pm':
+        return 'Product Manager / Medical Science Liaison';
+      case 'gm':
+        return 'General Manager';
+      default:
+        return 'Login';
+    }
   }
 
   Future<void> _handleLogin() async {
@@ -52,15 +61,30 @@ class _LoginScreenState extends State<LoginScreen> {
         _passwordController.text,
       );
 
-      // Role validation: تأكيد إن اليوزر داخل من الزر الصح (DM أو GM)
+      // Role validation: تأكيد إن اليوزر داخل من الزر الصح
       final role = (user['role'] ?? '').toString().toLowerCase();
-      final expectedRole = widget.role.toLowerCase(); // 'dm' أو 'gm'
+      final expectedRole = widget.role.toLowerCase(); // 'dm', 'pm', أو 'gm'
 
-      if (role != expectedRole) {
+      // DM/FT can use same login button
+      if (expectedRole == 'dm' && role != 'dm' && role != 'ft') {
         setState(() {
-          _error = expectedRole == 'gm'
-              ? 'This account is not a General Manager'
-              : 'This account is not a District Manager';
+          _error = 'This account is not a District Manager or Field Trainer';
+        });
+        return;
+      }
+      
+      // PM/MSL can use same login button
+      if (expectedRole == 'pm' && role != 'pm' && role != 'msl') {
+        setState(() {
+          _error = 'This account is not a Product Manager or Medical Science Liaison';
+        });
+        return;
+      }
+      
+      // GM must be GM only
+      if (expectedRole == 'gm' && role != 'gm') {
+        setState(() {
+          _error = 'This account is not a General Manager';
         });
         return;
       }

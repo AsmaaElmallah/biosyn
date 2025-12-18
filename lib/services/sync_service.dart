@@ -184,8 +184,15 @@ class SyncService {
       
       // Check if record exists in Supabase
       if (tableName == 'reports') {
+        // Parse local report to get coachRole for proper ID comparison
+        final reportJson = json.decode(localData['data'] as String) as Map<String, dynamic>;
+        final localReport = CoachingReport.fromJson(reportJson);
+        // Build expected reportId with coachRole (matches the format used in DatabaseService.saveReport)
+        final expectedReportId = '${localReport.mrId}_${localReport.date}_${localReport.coachRole ?? 'null'}';
+        
         final reports = await SupabaseService.getReports(localData['dm_id'] as String);
-        return reports.any((r) => '${r.mrId}_${r.date}' == recordId);
+        // Include coachRole in comparison to differentiate between DM/FT/PM/MSL reports
+        return reports.any((r) => '${r.mrId}_${r.date}_${r.coachRole ?? 'null'}' == expectedReportId);
       } else if (tableName == 'plans') {
         final plans = await SupabaseService.getPlans(localData['dm_id'] as String);
         return plans.any((p) => p['id'] == recordId);
@@ -211,9 +218,12 @@ class SyncService {
           Map<String, dynamic>? remoteData;
           if (tableName == 'reports') {
             final reports = await SupabaseService.getReports(localData['dm_id'] as String);
-            final reportId = '${localData['mr_id']}_${localData['date']}';
+            // Include coachRole in reportId to match the new ID format
+            final reportJson = json.decode(localData['data'] as String) as Map<String, dynamic>;
+            final localReport = CoachingReport.fromJson(reportJson);
+            final reportId = '${localReport.mrId}_${localReport.date}_${localReport.coachRole ?? 'null'}';
             final remoteReport = reports.firstWhere(
-              (r) => '${r.mrId}_${r.date}' == reportId,
+              (r) => '${r.mrId}_${r.date}_${r.coachRole ?? 'null'}' == reportId,
               orElse: () => throw Exception('Not found'),
             );
             // Convert to map for comparison

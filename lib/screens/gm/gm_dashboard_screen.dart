@@ -21,36 +21,57 @@ class GMDashboardScreen extends StatelessWidget {
     required this.onTabChange,
   });
 
+  String _getRoleLabel(String? role) {
+    switch (role?.toLowerCase()) {
+      case 'dm':
+        return 'District Manager';
+      case 'ft':
+        return 'Field Trainer';
+      case 'pm':
+        return 'Product Manager';
+      case 'msl':
+        return 'Medical Science Liaison';
+      default:
+        return 'Coach';
+    }
+  }
+
   double _calculateAvgScore(CoachingReport report) {
     return report.getAverageScore();
   }
 
   List<Map<String, dynamic>> _calculateDMPerformance() {
-    final dmStats = <String, Map<String, dynamic>>{};
+    final coachStats = <String, Map<String, dynamic>>{};
 
     for (final report in allReports) {
-      if (report.dmName.isEmpty) continue;
+      // Use coach name based on coachRole, fallback to dmName
+      final coachName = report.coachRole != null && report.coachRole!.isNotEmpty
+          ? '${report.dmName} (${report.coachRole!.toUpperCase()})'
+          : report.dmName;
       
-      if (!dmStats.containsKey(report.dmName)) {
-        dmStats[report.dmName] = {
+      if (coachName.isEmpty) continue;
+      
+      if (!coachStats.containsKey(coachName)) {
+        coachStats[coachName] = {
           'visits': 0,
           'scores': <double>[],
           'mrIds': <String>{},
+          'role': report.coachRole ?? 'dm',
         };
       }
 
-      dmStats[report.dmName]!['visits'] = (dmStats[report.dmName]!['visits'] as int) + 1;
+      coachStats[coachName]!['visits'] = (coachStats[coachName]!['visits'] as int) + 1;
       if (report.mrId.isNotEmpty) {
-        (dmStats[report.dmName]!['mrIds'] as Set<String>).add(report.mrId);
+        (coachStats[coachName]!['mrIds'] as Set<String>).add(report.mrId);
       }
 
       final avgScore = _calculateAvgScore(report);
       if (avgScore > 0) {
-        (dmStats[report.dmName]!['scores'] as List<double>).add(avgScore);
+        (coachStats[coachName]!['scores'] as List<double>).add(avgScore);
       }
     }
 
-    return dmStats.entries.map((entry) {
+    return coachStats.entries.map((entry) {
       final scores = entry.value['scores'] as List<double>;
       final avgScore = scores.isEmpty
           ? 0.0
@@ -66,6 +87,7 @@ class GMDashboardScreen extends StatelessWidget {
         'visits': entry.value['visits'],
         'avgScore': double.parse(avgScore.toStringAsFixed(2)),
         'mrCount': (entry.value['mrIds'] as Set<String>).length,
+        'role': entry.value['role'],
       };
     }).toList();
   }
@@ -206,7 +228,7 @@ class GMDashboardScreen extends StatelessWidget {
                         child: _buildStatCard(
                           'Total Visits',
                           '$totalVisits',
-                          'All DMs combined',
+                          'All Coaches combined',
                           Icons.timeline,
                           AppColors.primaryBlue,
                         ),
@@ -228,9 +250,9 @@ class GMDashboardScreen extends StatelessWidget {
                     children: [
                       Expanded(
                         child: _buildStatCard(
-                          'District Mgrs',
+                          'Coaches',
                           '$totalDMs',
-                          'Active managers',
+                          'DM/FT/PM/MSL',
                           Icons.people,
                           Colors.purple,
                         ),
@@ -254,7 +276,7 @@ class GMDashboardScreen extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
-                          'District Manager Performance',
+                          'Coach Performance (DM/FT/PM/MSL)',
                           style: TextStyle(
                             color: AppColors.primaryBlue,
                             fontSize: 18,
@@ -533,7 +555,7 @@ class GMDashboardScreen extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
-                          'District Manager Details',
+                          'Coach Details (DM/FT/PM/MSL)',
                           style: TextStyle(
                             color: AppColors.primaryBlue,
                             fontSize: 18,
@@ -623,9 +645,9 @@ class GMDashboardScreen extends StatelessWidget {
                                                       maxLines: 1,
                                                     ),
                                                     const SizedBox(height: 2),
-                                                    const Text(
-                                                      'District Manager',
-                                                      style: TextStyle(
+                                                    Text(
+                                                      _getRoleLabel(dm['role'] as String? ?? 'dm'),
+                                                      style: const TextStyle(
                                                         fontSize: 12,
                                                         color: AppColors.gray400,
                                                       ),

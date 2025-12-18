@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:biosyn_report_flutter/theme/colors.dart';
 
 class AppHeader extends StatelessWidget {
   final String title;

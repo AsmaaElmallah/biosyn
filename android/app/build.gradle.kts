@@ -42,3 +42,10 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // Suppress AndroidX Window Sidecar warning
+    configurations.all {
+        exclude(group = "androidx.window", module = "window-sidecar")
+    }
+}

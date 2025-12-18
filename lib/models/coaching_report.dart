@@ -4,6 +4,18 @@ class CoachingReport {
   final String dmName;
   final String mrId;
   final String mrName;
+  
+  // Coach Role (dm, ft, pm, msl)
+  final String? coachRole;
+  
+  // Brick Information (for all forms)
+  final String? brickName;
+  final double? brickLocationLat;
+  final double? brickLocationLng;
+  final int? visitCount;
+  final String? doctorsVisited; // Comma-separated list
+  
+  // DM/FT Form Fields
   final String? punctuality;
   final String? dressCode;
   final String? timeManagement;
@@ -27,6 +39,20 @@ class CoachingReport {
   final String? strengths;
   final String? improvements;
   final String? filledWithMR;
+  
+  // PM/MSL Form Fields
+  final String? areaBrickName; // "Area & Brick Name"
+  final String? typeOfVisit; // DM, Single, Double, Triple
+  final String? visitedAccountsNames;
+  final String? generalFeedback; // "General Feedback and Special Insights"
+  final String? customerAwareness; // High, Medium, Low
+  final String? medicalProductKnowledgeDM; // High, Medium, Low
+  final String? dmFeedbackComments; // "DM Feedback Comments and Insights"
+  final String? patientCentricApproach; // 1-6 scale
+  final String? medicalProductKnowledgeMR; // 1-6 scale
+  final String? featureBenefits; // 1-6 scale
+  final String? closingCommitment; // 1-6 scale
+  final String? mrFeedbackComments; // "MR Feedback Comments and Insights"
 
   CoachingReport({
     required this.date,
@@ -34,6 +60,12 @@ class CoachingReport {
     required this.dmName,
     required this.mrId,
     required this.mrName,
+    this.coachRole,
+    this.brickName,
+    this.brickLocationLat,
+    this.brickLocationLng,
+    this.visitCount,
+    this.doctorsVisited,
     this.punctuality,
     this.dressCode,
     this.timeManagement,
@@ -57,6 +89,18 @@ class CoachingReport {
     this.strengths,
     this.improvements,
     this.filledWithMR,
+    this.areaBrickName,
+    this.typeOfVisit,
+    this.visitedAccountsNames,
+    this.generalFeedback,
+    this.customerAwareness,
+    this.medicalProductKnowledgeDM,
+    this.dmFeedbackComments,
+    this.patientCentricApproach,
+    this.medicalProductKnowledgeMR,
+    this.featureBenefits,
+    this.closingCommitment,
+    this.mrFeedbackComments,
   });
 
   Map<String, dynamic> toJson() {
@@ -66,6 +110,12 @@ class CoachingReport {
       'dmName': dmName,
       'mrId': mrId,
       'mrName': mrName,
+      'coachRole': coachRole,
+      'brickName': brickName,
+      'brickLocationLat': brickLocationLat,
+      'brickLocationLng': brickLocationLng,
+      'visitCount': visitCount,
+      'doctorsVisited': doctorsVisited,
       'punctuality': punctuality,
       'dressCode': dressCode,
       'timeManagement': timeManagement,
@@ -89,6 +139,18 @@ class CoachingReport {
       'strengths': strengths,
       'improvements': improvements,
       'filledWithMR': filledWithMR,
+      'areaBrickName': areaBrickName,
+      'typeOfVisit': typeOfVisit,
+      'visitedAccountsNames': visitedAccountsNames,
+      'generalFeedback': generalFeedback,
+      'customerAwareness': customerAwareness,
+      'medicalProductKnowledgeDM': medicalProductKnowledgeDM,
+      'dmFeedbackComments': dmFeedbackComments,
+      'patientCentricApproach': patientCentricApproach,
+      'medicalProductKnowledgeMR': medicalProductKnowledgeMR,
+      'featureBenefits': featureBenefits,
+      'closingCommitment': closingCommitment,
+      'mrFeedbackComments': mrFeedbackComments,
     };
   }
 
@@ -99,6 +161,12 @@ class CoachingReport {
       dmName: json['dmName'] ?? '',
       mrId: json['mrId'] ?? '',
       mrName: json['mrName'] ?? '',
+      coachRole: json['coachRole'],
+      brickName: json['brickName'],
+      brickLocationLat: json['brickLocationLat'] != null ? double.tryParse(json['brickLocationLat'].toString()) : null,
+      brickLocationLng: json['brickLocationLng'] != null ? double.tryParse(json['brickLocationLng'].toString()) : null,
+      visitCount: json['visitCount'] != null ? int.tryParse(json['visitCount'].toString()) : null,
+      doctorsVisited: json['doctorsVisited'],
       punctuality: json['punctuality'],
       dressCode: json['dressCode'],
       timeManagement: json['timeManagement'],
@@ -122,6 +190,18 @@ class CoachingReport {
       strengths: json['strengths'],
       improvements: json['improvements'],
       filledWithMR: json['filledWithMR'],
+      areaBrickName: json['areaBrickName'],
+      typeOfVisit: json['typeOfVisit'],
+      visitedAccountsNames: json['visitedAccountsNames'],
+      generalFeedback: json['generalFeedback'],
+      customerAwareness: json['customerAwareness'],
+      medicalProductKnowledgeDM: json['medicalProductKnowledgeDM'],
+      dmFeedbackComments: json['dmFeedbackComments'],
+      patientCentricApproach: json['patientCentricApproach'],
+      medicalProductKnowledgeMR: json['medicalProductKnowledgeMR'],
+      featureBenefits: json['featureBenefits'],
+      closingCommitment: json['closingCommitment'],
+      mrFeedbackComments: json['mrFeedbackComments'],
     );
   }
 
@@ -133,6 +213,12 @@ class CoachingReport {
       dmName: json['dm_name']?.toString() ?? '',
       mrId: json['mr_id']?.toString() ?? '',
       mrName: json['mr_name']?.toString() ?? '',
+      coachRole: json['coach_role']?.toString(),
+      brickName: json['brick_name']?.toString(),
+      brickLocationLat: json['brick_location_lat'] != null ? double.tryParse(json['brick_location_lat'].toString()) : null,
+      brickLocationLng: json['brick_location_lng'] != null ? double.tryParse(json['brick_location_lng'].toString()) : null,
+      visitCount: json['visit_count'] != null ? int.tryParse(json['visit_count'].toString()) : null,
+      doctorsVisited: json['doctors_visited']?.toString(),
       punctuality: json['punctuality']?.toString(),
       dressCode: json['dress_code']?.toString(),
       timeManagement: json['time_management']?.toString(),
@@ -156,6 +242,18 @@ class CoachingReport {
       strengths: json['strengths']?.toString(),
       improvements: json['improvements']?.toString(),
       filledWithMR: json['filled_with_mr']?.toString(),
+      areaBrickName: json['area_brick_name']?.toString(),
+      typeOfVisit: json['type_of_visit']?.toString(),
+      visitedAccountsNames: json['visited_accounts_names']?.toString(),
+      generalFeedback: json['general_feedback']?.toString(),
+      customerAwareness: json['customer_awareness']?.toString(),
+      medicalProductKnowledgeDM: json['medical_product_knowledge_dm']?.toString(),
+      dmFeedbackComments: json['dm_feedback_comments']?.toString(),
+      patientCentricApproach: json['patient_centric_approach']?.toString(),
+      medicalProductKnowledgeMR: json['medical_product_knowledge_mr']?.toString(),
+      featureBenefits: json['feature_benefits']?.toString(),
+      closingCommitment: json['closing_commitment']?.toString(),
+      mrFeedbackComments: json['mr_feedback_comments']?.toString(),
     );
   }
 

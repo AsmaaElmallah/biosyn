@@ -20,7 +20,20 @@ class ProfileScreen extends StatelessWidget {
   });
 
   String get _roleTitle {
-    return role == 'dm' ? 'District Manager' : 'General Manager';
+    switch (role.toLowerCase()) {
+      case 'dm':
+        return 'District Manager';
+      case 'ft':
+        return 'Field Trainer';
+      case 'pm':
+        return 'Product Manager';
+      case 'msl':
+        return 'Medical Science Liaison';
+      case 'gm':
+        return 'General Manager';
+      default:
+        return 'User';
+    }
   }
 
   @override

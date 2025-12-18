@@ -15,7 +15,11 @@ class BottomNav extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tabs = role == 'dm' ? _dmTabs : _gmTabs;
+    final tabs = role == 'dm' || role == 'ft'
+        ? _dmTabs
+        : role == 'pm' || role == 'msl'
+            ? _pmMslTabs
+            : _gmTabs;
 
     return Container(
       decoration: BoxDecoration(
@@ -80,6 +84,12 @@ class BottomNav extends StatelessWidget {
   }
 
   static const List<Map<String, dynamic>> _dmTabs = [
+    {'id': 'planning', 'label': 'Coaching', 'icon': Icons.home_outlined},
+    {'id': 'dashboard', 'label': 'Dashboard', 'icon': Icons.bar_chart},
+    {'id': 'profile', 'label': 'Profile', 'icon': Icons.settings_outlined},
+  ];
+
+  static const List<Map<String, dynamic>> _pmMslTabs = [
     {'id': 'planning', 'label': 'Coaching', 'icon': Icons.home_outlined},
     {'id': 'dashboard', 'label': 'Dashboard', 'icon': Icons.bar_chart},
     {'id': 'profile', 'label': 'Profile', 'icon': Icons.settings_outlined},
