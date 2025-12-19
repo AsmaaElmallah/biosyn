@@ -12,6 +12,8 @@ class CoachingReport {
   final String? brickName;
   final double? brickLocationLat;
   final double? brickLocationLng;
+  final String? locationName; // Name from Google Maps
+  final String? googleMapsUrl; // Google Maps link
   final int? visitCount;
   final String? doctorsVisited; // Comma-separated list
   
@@ -64,6 +66,8 @@ class CoachingReport {
     this.brickName,
     this.brickLocationLat,
     this.brickLocationLng,
+    this.locationName,
+    this.googleMapsUrl,
     this.visitCount,
     this.doctorsVisited,
     this.punctuality,
@@ -114,6 +118,8 @@ class CoachingReport {
       'brickName': brickName,
       'brickLocationLat': brickLocationLat,
       'brickLocationLng': brickLocationLng,
+      'locationName': locationName,
+      'googleMapsUrl': googleMapsUrl,
       'visitCount': visitCount,
       'doctorsVisited': doctorsVisited,
       'punctuality': punctuality,
@@ -165,6 +171,8 @@ class CoachingReport {
       brickName: json['brickName'],
       brickLocationLat: json['brickLocationLat'] != null ? double.tryParse(json['brickLocationLat'].toString()) : null,
       brickLocationLng: json['brickLocationLng'] != null ? double.tryParse(json['brickLocationLng'].toString()) : null,
+      locationName: json['locationName'],
+      googleMapsUrl: json['googleMapsUrl'],
       visitCount: json['visitCount'] != null ? int.tryParse(json['visitCount'].toString()) : null,
       doctorsVisited: json['doctorsVisited'],
       punctuality: json['punctuality'],
@@ -217,6 +225,8 @@ class CoachingReport {
       brickName: json['brick_name']?.toString(),
       brickLocationLat: json['brick_location_lat'] != null ? double.tryParse(json['brick_location_lat'].toString()) : null,
       brickLocationLng: json['brick_location_lng'] != null ? double.tryParse(json['brick_location_lng'].toString()) : null,
+      locationName: json['location_name']?.toString(),
+      googleMapsUrl: json['google_maps_url']?.toString(),
       visitCount: json['visit_count'] != null ? int.tryParse(json['visit_count'].toString()) : null,
       doctorsVisited: json['doctors_visited']?.toString(),
       punctuality: json['punctuality']?.toString(),

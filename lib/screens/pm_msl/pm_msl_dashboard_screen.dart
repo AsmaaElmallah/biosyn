@@ -5,6 +5,7 @@ import 'package:biosyn_report_flutter/widgets/app_header.dart';
 import 'package:biosyn_report_flutter/widgets/sync_status_indicator.dart';
 import 'package:biosyn_report_flutter/models/coaching_report.dart';
 import 'package:biosyn_report_flutter/services/supabase_service.dart';
+import 'package:biosyn_report_flutter/utils/export_utils.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
@@ -36,6 +37,7 @@ class PMMSLDashboardScreen extends StatefulWidget {
 class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
   StreamSubscription<List<CoachingReport>>? _reportsSubscription;
   List<CoachingReport> _currentReports = [];
+  CoachingReport? _selectedReport;
 
   Map<String, dynamic> _calculateStatsFromReports(List<CoachingReport> reports) {
     final now = DateTime.now();
@@ -935,13 +937,17 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                                 Row(
                                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                                   children: [
-                                                    Text(
-                                                      report.mrName,
-                                                      style: const TextStyle(
-                                                        fontWeight: FontWeight.w600,
-                                                        fontSize: 16,
+                                                    Expanded(
+                                                      child: Text(
+                                                        report.mrName,
+                                                        style: const TextStyle(
+                                                          fontWeight: FontWeight.w600,
+                                                          fontSize: 16,
+                                                        ),
+                                                        overflow: TextOverflow.ellipsis,
                                                       ),
                                                     ),
+                                                    const SizedBox(width: 8),
                                                     Text(
                                                       report.date,
                                                       style: const TextStyle(
@@ -953,17 +959,75 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                                 ),
                                                 const SizedBox(height: 8),
                                                 Row(
+                                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                                   children: [
-                                                    Icon(Icons.star, color: AppColors.success, size: 16),
-                                                    const SizedBox(width: 4),
-                                                    Text(
-                                                      'Score: ${report.getAverageScore().toStringAsFixed(2)}',
-                                                      style: const TextStyle(
-                                                        color: AppColors.gray700,
-                                                        fontSize: 14,
+                                                    Row(
+                                                      children: [
+                                                        Icon(Icons.star, color: AppColors.primaryBlue, size: 16),
+                                                        const SizedBox(width: 4),
+                                                        Text(
+                                                          '${report.getAverageScore().toStringAsFixed(1)}/6',
+                                                          style: const TextStyle(
+                                                            color: AppColors.primaryBlue,
+                                                            fontSize: 14,
+                                                            fontWeight: FontWeight.w600,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    Container(
+                                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                                      decoration: BoxDecoration(
+                                                        color: AppColors.success.withOpacity(0.1),
+                                                        borderRadius: BorderRadius.circular(20),
+                                                      ),
+                                                      child: const Row(
+                                                        mainAxisSize: MainAxisSize.min,
+                                                        children: [
+                                                          Icon(Icons.check_circle, size: 12, color: AppColors.success),
+                                                          SizedBox(width: 4),
+                                                          Text(
+                                                            'Completed',
+                                                            style: TextStyle(
+                                                              color: AppColors.success,
+                                                              fontSize: 12,
+                                                              fontWeight: FontWeight.w500,
+                                                            ),
+                                                          ),
+                                                        ],
                                                       ),
                                                     ),
                                                   ],
+                                                ),
+                                                const SizedBox(height: 12),
+                                                InkWell(
+                                                  onTap: () {
+                                                    setState(() {
+                                                      _selectedReport = report;
+                                                    });
+                                                  },
+                                                  child: Container(
+                                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                                    decoration: BoxDecoration(
+                                                      color: AppColors.primaryBlue.withOpacity(0.1),
+                                                      borderRadius: BorderRadius.circular(8),
+                                                    ),
+                                                    child: const Row(
+                                                      mainAxisAlignment: MainAxisAlignment.center,
+                                                      children: [
+                                                        Icon(Icons.visibility, color: AppColors.primaryBlue, size: 16),
+                                                        SizedBox(width: 8),
+                                                        Text(
+                                                          'View Details',
+                                                          style: TextStyle(
+                                                            color: AppColors.primaryBlue,
+                                                            fontSize: 14,
+                                                            fontWeight: FontWeight.w500,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
                                                 ),
                                               ],
                                             ),
@@ -973,6 +1037,48 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                               ],
                             ),
                           ),
+                          const SizedBox(height: 24),
+                          // Export Button
+                          Container(
+                            decoration: BoxDecoration(
+                              gradient: AppColors.primaryGradientHorizontal,
+                              borderRadius: BorderRadius.circular(12),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: AppColors.primaryBlue.withOpacity(0.3),
+                                  blurRadius: 15,
+                                  offset: const Offset(0, 5),
+                                ),
+                              ],
+                            ),
+                            child: Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                onTap: () => widget.onExport(null),
+                                borderRadius: BorderRadius.circular(12),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(vertical: 16),
+                                  child: const Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.file_download, color: Colors.white),
+                                      SizedBox(width: 8),
+                                      Text(
+                                        'Export Monthly Report',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          // Bottom padding to account for BottomNav
+                          const SizedBox(height: 100),
                         ],
                       ),
                     ),
@@ -986,6 +1092,9 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                 ),
               ],
             ),
+            // Report Modal
+            if (_selectedReport != null)
+              _buildReportModal(context, _selectedReport!),
           ],
         ),
       ),
@@ -1049,6 +1158,761 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  double _calculateAvgScore(CoachingReport report) {
+    return report.getAverageScore();
+  }
+
+  Widget _buildModalSection(String title, List<Widget> children) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            color: AppColors.primaryBlue,
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 12),
+        ...children,
+      ],
+    );
+  }
+
+  Widget _buildModalInfoItem(String label, String value) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.gray50,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Flexible(
+            flex: 2,
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: AppColors.gray600,
+                fontSize: 14,
+              ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 2,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            flex: 3,
+            child: Text(
+              value,
+              style: const TextStyle(
+                color: AppColors.gray900,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+              textAlign: TextAlign.end,
+              overflow: TextOverflow.ellipsis,
+              maxLines: 2,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildModalYesNoItem(String label, String? value) {
+    final isYes = value == 'Yes';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.gray50,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: AppColors.gray600,
+                fontSize: 14,
+              ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 2,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: isYes
+                  ? AppColors.success.withOpacity(0.1)
+                  : AppColors.error.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              value ?? 'N/A',
+              style: TextStyle(
+                color: isYes ? AppColors.success : AppColors.error,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildModalScoreItem(String label, String? value) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.gray50,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Flexible(
+            flex: 3,
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: AppColors.gray600,
+                fontSize: 14,
+              ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 2,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            flex: 1,
+            child: Text(
+              value != null ? '$value/6' : 'N/A',
+              style: const TextStyle(
+                color: AppColors.gray900,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+              textAlign: TextAlign.end,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReportModal(BuildContext context, CoachingReport report) {
+    final avgScore = _calculateAvgScore(report);
+    final scorePercent = (avgScore / 6.0 * 100).clamp(0, 100);
+    final scoreColor = avgScore >= 5.0 ? AppColors.success 
+        : avgScore >= 4.0 ? AppColors.warning 
+        : AppColors.error;
+    // Get initials from name
+    final initials = report.mrName.split(' ')
+        .take(2)
+        .map((e) => e.isNotEmpty ? e[0].toUpperCase() : '')
+        .join();
+    
+    // Check if this is a PM/MSL report (has PM/MSL specific fields)
+    final isPMMSLReport = report.visitedAccountsNames != null || report.generalFeedback != null ||
+                         report.dmFeedbackComments != null || report.mrFeedbackComments != null ||
+                         report.customerAwareness != null || report.medicalProductKnowledgeDM != null;
+    
+    return Container(
+      color: Colors.black54,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.9,
+            maxWidth: MediaQuery.of(context).size.width * 0.95,
+          ),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Material(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Modal Header - Enhanced with Score
+                  Container(
+                    decoration: const BoxDecoration(
+                      gradient: AppColors.primaryGradientHorizontal,
+                      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+                    child: Column(
+                      children: [
+                        Row(
+                          children: [
+                            // Avatar
+                            Container(
+                              width: 56,
+                              height: 56,
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.1),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Center(
+                                child: Text(
+                                  initials.isNotEmpty ? initials : 'MR',
+                                  style: const TextStyle(
+                                    color: AppColors.primaryBlue,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 14),
+                            // Name and title
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '${widget.coachRole.toUpperCase()} Coaching Report',
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    report.mrName,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                    maxLines: 1,
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    report.date,
+                                    style: TextStyle(
+                                      color: Colors.white.withOpacity(0.8),
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            // Score circle
+                            Container(
+                              width: 60,
+                              height: 60,
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: scoreColor.withOpacity(0.3),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 3),
+                                  ),
+                                ],
+                              ),
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  SizedBox(
+                                    width: 52,
+                                    height: 52,
+                                    child: CircularProgressIndicator(
+                                      value: scorePercent / 100,
+                                      strokeWidth: 4,
+                                      backgroundColor: AppColors.gray200,
+                                      valueColor: AlwaysStoppedAnimation<Color>(scoreColor),
+                                    ),
+                                  ),
+                                  Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        avgScore.toStringAsFixed(1),
+                                        style: TextStyle(
+                                          color: scoreColor,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      Text(
+                                        '/6',
+                                        style: TextStyle(
+                                          color: AppColors.gray600,
+                                          fontSize: 9,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Modal Content
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // Basic Info
+                          _buildModalSection(
+                            'Basic Information',
+                            [
+                              _buildModalInfoItem('Date', report.date),
+                              _buildModalInfoItem('Average Score', '${avgScore.toStringAsFixed(2)} / 6.0'),
+                              if (report.dmName.isNotEmpty)
+                                _buildModalInfoItem('District Manager', report.dmName),
+                              _buildModalInfoItem('Medical Rep', report.mrName),
+                              if (report.brickName != null && report.brickName!.isNotEmpty)
+                                _buildModalInfoItem('Brick Name', report.brickName!),
+                              if (report.locationName != null && report.locationName!.isNotEmpty)
+                                _buildModalInfoItem('Location', report.locationName!),
+                            ],
+                          ),
+                          const SizedBox(height: 24),
+                          // PM/MSL Specific Fields or DM/FT Fields
+                          if (isPMMSLReport) ...[
+                            // Visit Details
+                            if (report.visitedAccountsNames != null && report.visitedAccountsNames!.isNotEmpty)
+                              _buildModalSection(
+                                'Visit Details',
+                                [
+                                  _buildModalInfoItem('Visited Accounts', report.visitedAccountsNames!),
+                                  if (report.doctorsVisited != null && report.doctorsVisited!.isNotEmpty)
+                                    _buildModalInfoItem('Doctors Visited', report.doctorsVisited!),
+                                ],
+                              ),
+                            const SizedBox(height: 24),
+                            // DM Feedback
+                            if (report.dmFeedbackComments != null || report.customerAwareness != null || report.medicalProductKnowledgeDM != null)
+                              _buildModalSection(
+                                'DM Feedback',
+                                [
+                                  if (report.customerAwareness != null)
+                                    _buildModalInfoItem('Customer Awareness', report.customerAwareness!),
+                                  if (report.medicalProductKnowledgeDM != null)
+                                    _buildModalInfoItem('Medical & Product Knowledge', report.medicalProductKnowledgeDM!),
+                                  if (report.dmFeedbackComments != null && report.dmFeedbackComments!.isNotEmpty)
+                                    Container(
+                                      margin: const EdgeInsets.only(bottom: 8),
+                                      padding: const EdgeInsets.all(12),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.gray50,
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Text(
+                                            'DM Feedback Comments',
+                                            style: TextStyle(
+                                              color: AppColors.gray600,
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Text(
+                                            report.dmFeedbackComments!,
+                                            style: const TextStyle(
+                                              color: AppColors.gray900,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            const SizedBox(height: 24),
+                            // MR Feedback
+                            if (report.punctuality != null || report.dressCode != null || report.pharmacyFeedback != null || report.mrFeedbackComments != null)
+                              _buildModalSection(
+                                'MR Feedback',
+                                [
+                                  if (report.punctuality != null)
+                                    _buildModalYesNoItem('Punctuality', report.punctuality),
+                                  if (report.dressCode != null)
+                                    _buildModalYesNoItem('Dress Code', report.dressCode),
+                                  if (report.pharmacyFeedback != null)
+                                    _buildModalScoreItem('Pharmacy Feedback', report.pharmacyFeedback),
+                                  if (report.reviewProfile != null)
+                                    _buildModalScoreItem('Review Customer Profile', report.reviewProfile),
+                                  if (report.mrFeedbackComments != null && report.mrFeedbackComments!.isNotEmpty)
+                                    Container(
+                                      margin: const EdgeInsets.only(bottom: 8),
+                                      padding: const EdgeInsets.all(12),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.gray50,
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Text(
+                                            'MR Feedback Comments',
+                                            style: TextStyle(
+                                              color: AppColors.gray600,
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Text(
+                                            report.mrFeedbackComments!,
+                                            style: const TextStyle(
+                                              color: AppColors.gray900,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            const SizedBox(height: 24),
+                            // General Feedback
+                            if (report.generalFeedback != null && report.generalFeedback!.isNotEmpty)
+                              _buildModalSection(
+                                'General Feedback',
+                                [
+                                  Container(
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.primaryCyan.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: AppColors.primaryCyan.withOpacity(0.3),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      report.generalFeedback!,
+                                      style: const TextStyle(
+                                        color: AppColors.gray900,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                          ] else ...[
+                            // DM/FT Fields
+                            // Personal Attributes
+                            _buildModalSection(
+                              'Personal Attributes',
+                              [
+                                _buildModalYesNoItem('Punctuality', report.punctuality),
+                                _buildModalYesNoItem('Dress Code', report.dressCode),
+                                _buildModalYesNoItem('Time & Territory Management', report.timeManagement),
+                              ],
+                            ),
+                            const SizedBox(height: 24),
+                            // Performance Scores
+                            _buildModalSection(
+                              'Performance Scores',
+                              [
+                                _buildModalScoreItem('Pharmacy Feedback', report.pharmacyFeedback),
+                                _buildModalScoreItem('Review Customer Profile', report.reviewProfile),
+                                _buildModalScoreItem('Brand Bonding Ladder', report.brandBonding),
+                                _buildModalScoreItem('SMART Objectives', report.smartObjectives),
+                                _buildModalScoreItem('Opening / Rapport', report.opening),
+                                _buildModalScoreItem('Patient Profile', report.patientProfile),
+                                _buildModalScoreItem('Engaging Customer', report.engaging),
+                                _buildModalScoreItem('Insightful Questions', report.insightfulQuestions),
+                                _buildModalScoreItem('Active Listening', report.activeListening),
+                                _buildModalScoreItem('Link Features', report.linkFeatures),
+                                _buildModalScoreItem('Product Knowledge', report.productKnowledge),
+                                _buildModalScoreItem('E-detailing', report.eDetailing),
+                                _buildModalScoreItem('Answering Questions', report.answeringQuestions),
+                                _buildModalScoreItem('Summarize Call', report.summarizeCall),
+                                _buildModalScoreItem('Ask for Commitment', report.askCommitment),
+                                _buildModalScoreItem('Bridging', report.bridging),
+                                _buildModalScoreItem('Self-assessment', report.selfAssessment),
+                              ],
+                            ),
+                            const SizedBox(height: 24),
+                            // Feedback
+                            _buildModalSection(
+                              'Feedback',
+                              [
+                                Container(
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.success.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: AppColors.success.withOpacity(0.3),
+                                    ),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Row(
+                                        children: [
+                                          Icon(Icons.check_circle, color: AppColors.success, size: 16),
+                                          SizedBox(width: 8),
+                                          Text(
+                                            'Strengths',
+                                            style: TextStyle(
+                                              color: AppColors.gray700,
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        report.strengths ?? 'No feedback provided',
+                                        style: const TextStyle(
+                                          color: AppColors.gray900,
+                                          fontSize: 14,
+                                        ),
+                                        overflow: TextOverflow.visible,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Container(
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.warning.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: AppColors.warning.withOpacity(0.3),
+                                    ),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Row(
+                                        children: [
+                                          Icon(Icons.track_changes, color: AppColors.warning, size: 16),
+                                          SizedBox(width: 8),
+                                          Text(
+                                            'Areas of Improvement',
+                                            style: TextStyle(
+                                              color: AppColors.gray700,
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        report.improvements ?? 'No feedback provided',
+                                        style: const TextStyle(
+                                          color: AppColors.gray900,
+                                          fontSize: 14,
+                                        ),
+                                        overflow: TextOverflow.visible,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 24),
+                            // Additional Info
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: AppColors.primaryCyan.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: AppColors.primaryCyan.withOpacity(0.3),
+                                ),
+                              ),
+                              child: RichText(
+                                text: TextSpan(
+                                  style: const TextStyle(
+                                    color: AppColors.gray700,
+                                    fontSize: 14,
+                                  ),
+                                  children: [
+                                    const TextSpan(
+                                      text: 'Filled with Medical Representative: ',
+                                      style: TextStyle(fontWeight: FontWeight.bold),
+                                    ),
+                                    TextSpan(
+                                      text: report.filledWithMR ?? 'N/A',
+                                      style: TextStyle(
+                                        color: report.filledWithMR == 'Yes'
+                                            ? AppColors.success
+                                            : AppColors.error,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 2,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  // Modal Footer
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        top: BorderSide(color: AppColors.gray200),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () {
+                                setState(() {
+                                  _selectedReport = null;
+                                });
+                              },
+                              borderRadius: BorderRadius.circular(12),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                decoration: BoxDecoration(
+                                  color: AppColors.gray100,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: const Center(
+                                  child: Text(
+                                    'Close',
+                                    style: TextStyle(
+                                      color: AppColors.gray700,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFF10B981), Color(0xFF059669)],
+                              ),
+                              borderRadius: BorderRadius.circular(12),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: AppColors.success.withOpacity(0.3),
+                                  blurRadius: 15,
+                                  offset: const Offset(0, 5),
+                                ),
+                              ],
+                            ),
+                            child: Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                onTap: () async {
+                                  try {
+                                    await ExportUtils.exportSingleReportToText(report);
+                                    if (mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Report exported successfully!')),
+                                      );
+                                    }
+                                  } catch (e) {
+                                    if (mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('Export failed: $e')),
+                                      );
+                                    }
+                                  }
+                                  if (mounted) {
+                                    setState(() {
+                                      _selectedReport = null;
+                                    });
+                                  }
+                                },
+                                borderRadius: BorderRadius.circular(12),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+                                  child: const Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.download, color: Colors.white, size: 18),
+                                      SizedBox(width: 6),
+                                      Flexible(
+                                        child: Text(
+                                          'Export',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

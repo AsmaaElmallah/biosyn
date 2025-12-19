@@ -43,7 +43,11 @@ class GMDashboardScreen extends StatelessWidget {
   List<Map<String, dynamic>> _calculateDMPerformance() {
     final coachStats = <String, Map<String, dynamic>>{};
 
-    for (final report in allReports) {
+    // Filter: Only include reports with MRs (mrId is not empty)
+    // This excludes reports where PM/MSL coached a DM (typeOfVisit = 'DM')
+    final mrReports = allReports.where((r) => r.mrId.isNotEmpty).toList();
+
+    for (final report in mrReports) {
       // Use coach name based on coachRole, fallback to dmName
       final coachName = report.coachRole != null && report.coachRole!.isNotEmpty
           ? '${report.dmName} (${report.coachRole!.toUpperCase()})'
@@ -61,9 +65,8 @@ class GMDashboardScreen extends StatelessWidget {
       }
 
       coachStats[coachName]!['visits'] = (coachStats[coachName]!['visits'] as int) + 1;
-      if (report.mrId.isNotEmpty) {
-        (coachStats[coachName]!['mrIds'] as Set<String>).add(report.mrId);
-      }
+      // mrId is guaranteed to be non-empty here due to filter above
+      (coachStats[coachName]!['mrIds'] as Set<String>).add(report.mrId);
 
       final avgScore = _calculateAvgScore(report);
       if (avgScore > 0) {
@@ -77,19 +80,43 @@ class GMDashboardScreen extends StatelessWidget {
           ? 0.0
           : scores.reduce((a, b) => a + b) / scores.length;
       
-      final nameParts = entry.key.split(' ');
-      final shortName = nameParts.length >= 2 
-          ? '${nameParts[0]} ${nameParts[1]}'
-          : entry.key;
-
+      // Extract name without role suffix FIRST (e.g., "Ahmed (MSL)" -> "Ahmed")
+      String cleanName = entry.key;
+      if (cleanName.contains(' (')) {
+        cleanName = cleanName.substring(0, cleanName.indexOf(' ('));
+      }
+      
+      // Skip if name is a role name (should not happen, but safety check)
+      final roleNames = ['district manager', 'field trainer', 'product manager', 'medical science liaison', 'dm', 'ft', 'pm', 'msl'];
+      if (roleNames.contains(cleanName.toLowerCase())) {
+        // Skip this entry - it's not a real person name
+        return null;
+      }
+      
+      // Create shorter name for display from clean name
+      String shortName;
+      final nameParts = cleanName.split(' ').where((part) => part.isNotEmpty).toList();
+      
+      if (nameParts.length >= 2) {
+        // Take first name and first letter of second name
+        // Example: "Ahmed Sabry" -> "Ahmed S."
+        shortName = '${nameParts[0]} ${nameParts[1][0].toUpperCase()}.';
+      } else if (cleanName.length > 12) {
+        // If name is too long, truncate it
+        shortName = '${cleanName.substring(0, 12)}...';
+      } else {
+        shortName = cleanName;
+      }
+      
       return {
         'name': shortName,
+        'fullName': cleanName, // Name without role suffix
         'visits': entry.value['visits'],
         'avgScore': double.parse(avgScore.toStringAsFixed(2)),
         'mrCount': (entry.value['mrIds'] as Set<String>).length,
         'role': entry.value['role'],
       };
-    }).toList();
+    }).whereType<Map<String, dynamic>>().toList();
   }
 
   List<Map<String, dynamic>> _calculateScoreDistribution() {
@@ -100,7 +127,10 @@ class GMDashboardScreen extends StatelessWidget {
       'needs': 0,
     };
 
-    for (final report in allReports) {
+    // Filter: Only include reports with MRs (mrId is not empty)
+    final mrReports = allReports.where((r) => r.mrId.isNotEmpty).toList();
+
+    for (final report in mrReports) {
       final avgScore = _calculateAvgScore(report);
       if (avgScore >= 5) {
         distribution['excellent'] = (distribution['excellent'] as int) + 1;
@@ -149,11 +179,14 @@ class GMDashboardScreen extends StatelessWidget {
     final now = DateTime.now();
     final monthlyData = <Map<String, dynamic>>[];
 
+    // Filter: Only include reports with MRs (mrId is not empty)
+    final mrReports = allReports.where((r) => r.mrId.isNotEmpty).toList();
+
     for (int i = 5; i >= 0; i--) {
       final date = DateTime(now.year, now.month - i, 1);
       final month = months[date.month - 1];
       
-      final monthReports = allReports.where((r) {
+      final monthReports = mrReports.where((r) {
         if (r.date.isEmpty) return false;
         try {
           final reportDate = DateTime.parse(r.date);
@@ -187,11 +220,14 @@ class GMDashboardScreen extends StatelessWidget {
     final scoreDistribution = _calculateScoreDistribution();
     final monthlyTrend = _calculateMonthlyTrend();
 
-    final totalVisits = allReports.length;
-    final totalDMs = allReports.map((r) => r.dmId).where((id) => id.isNotEmpty).toSet().length;
-    final totalMRs = allReports.map((r) => r.mrId).where((id) => id.isNotEmpty).toSet().length;
+    // Filter: Only include reports with MRs (mrId is not empty)
+    final mrReports = allReports.where((r) => r.mrId.isNotEmpty).toList();
     
-    final allScores = allReports
+    final totalVisits = mrReports.length;
+    final totalDMs = mrReports.map((r) => r.dmId).where((id) => id.isNotEmpty).toSet().length;
+    final totalMRs = mrReports.map((r) => r.mrId).where((id) => id.isNotEmpty).toSet().length;
+    
+    final allScores = mrReports
         .map((r) => _calculateAvgScore(r))
         .where((s) => s > 0)
         .toList();
@@ -284,64 +320,70 @@ class GMDashboardScreen extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 16),
-                        SizedBox(
-                          height: 250,
-                          child: BarChart(
-                            BarChartData(
-                              gridData: FlGridData(
-                                show: true,
-                                drawVerticalLine: false,
-                                getDrawingHorizontalLine: (value) {
-                                  return FlLine(
-                                    color: AppColors.gray200,
-                                    strokeWidth: 1,
-                                    dashArray: [3, 3],
-                                  );
-                                },
-                              ),
-                              titlesData: FlTitlesData(
-                                leftTitles: AxisTitles(
-                                  sideTitles: SideTitles(
-                                    showTitles: true,
-                                    reservedSize: 40,
-                                    getTitlesWidget: (value, meta) {
-                                      return Text(
-                                        value.toInt().toString(),
-                                        style: const TextStyle(
-                                          color: AppColors.gray600,
-                                          fontSize: 11,
-                                        ),
-                                      );
-                                    },
-                                  ),
+                        // Horizontal scrollable chart container
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: SizedBox(
+                            width: dmPerformance.length > 5 
+                                ? (dmPerformance.length * 80.0).clamp(400.0, double.infinity)
+                                : MediaQuery.of(context).size.width - 48,
+                            height: 300,
+                            child: BarChart(
+                              BarChartData(
+                                gridData: FlGridData(
+                                  show: true,
+                                  drawVerticalLine: false,
+                                  getDrawingHorizontalLine: (value) {
+                                    return FlLine(
+                                      color: AppColors.gray200,
+                                      strokeWidth: 1,
+                                      dashArray: [3, 3],
+                                    );
+                                  },
                                 ),
-                                bottomTitles: AxisTitles(
-                                  sideTitles: SideTitles(
-                                    showTitles: true,
-                                    reservedSize: 70,
-                                    getTitlesWidget: (value, meta) {
-                                      if (value.toInt() >= 0 && value.toInt() < dmPerformance.length) {
-                                        return Padding(
-                                          padding: const EdgeInsets.only(top: 8),
-                                          child: RotatedBox(
-                                            quarterTurns: 0,
-                                            child: Text(
-                                              dmPerformance[value.toInt()]['name'],
-                                              style: const TextStyle(
-                                                color: AppColors.gray600,
-                                                fontSize: 10,
-                                              ),
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                              textAlign: TextAlign.center,
-                                            ),
+                                titlesData: FlTitlesData(
+                                  leftTitles: AxisTitles(
+                                    sideTitles: SideTitles(
+                                      showTitles: true,
+                                      reservedSize: 40,
+                                      getTitlesWidget: (value, meta) {
+                                        return Text(
+                                          value.toInt().toString(),
+                                          style: const TextStyle(
+                                            color: AppColors.gray600,
+                                            fontSize: 11,
                                           ),
                                         );
-                                      }
-                                      return const Text('');
-                                    },
+                                      },
+                                    ),
                                   ),
-                                ),
+                                  bottomTitles: AxisTitles(
+                                    sideTitles: SideTitles(
+                                      showTitles: true,
+                                      reservedSize: 100, // Increased for rotated text
+                                      getTitlesWidget: (value, meta) {
+                                        if (value.toInt() >= 0 && value.toInt() < dmPerformance.length) {
+                                          return Padding(
+                                            padding: const EdgeInsets.only(top: 8),
+                                            child: RotatedBox(
+                                              quarterTurns: 1, // Rotate 45 degrees (90 degrees)
+                                              child: Text(
+                                                dmPerformance[value.toInt()]['name'] as String,
+                                                style: const TextStyle(
+                                                  color: AppColors.gray600,
+                                                  fontSize: 9,
+                                                ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                textAlign: TextAlign.center,
+                                              ),
+                                            ),
+                                          );
+                                        }
+                                        return const Text('');
+                                      },
+                                    ),
+                                  ),
                                 rightTitles: const AxisTitles(
                                   sideTitles: SideTitles(showTitles: false),
                                 ),
@@ -369,6 +411,7 @@ class GMDashboardScreen extends StatelessWidget {
                                   ? 10
                                   : (dmPerformance.map((e) => e['visits'] as int).reduce((a, b) => a > b ? a : b) * 1.2),
                             ),
+                          ),
                           ),
                         ),
                       ],
@@ -620,7 +663,7 @@ class GMDashboardScreen extends StatelessWidget {
                                                 ),
                                                 child: Center(
                                                   child: Text(
-                                                    (dm['name'] as String).split(' ').take(2).map((e) => e.isNotEmpty ? e[0].toUpperCase() : '').join(),
+                                                    ((dm['fullName'] ?? dm['name']) as String).split(' ').take(2).map((e) => e.isNotEmpty ? e[0].toUpperCase() : '').join(),
                                                     style: const TextStyle(
                                                       color: Colors.white,
                                                       fontSize: 16,
@@ -635,7 +678,7 @@ class GMDashboardScreen extends StatelessWidget {
                                                   crossAxisAlignment: CrossAxisAlignment.start,
                                                   children: [
                                                     Text(
-                                                      dm['name'],
+                                                      dm['fullName'] ?? dm['name'],
                                                       style: const TextStyle(
                                                         fontSize: 16,
                                                         fontWeight: FontWeight.w600,

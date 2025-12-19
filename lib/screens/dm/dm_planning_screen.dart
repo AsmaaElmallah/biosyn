@@ -16,6 +16,7 @@ class DMPlanningScreen extends StatefulWidget {
   final Function(String) onTabChange;
   final String? dmId;
   final String? dmName;
+  final String? coachRole; // 'dm' or 'ft'
 
   const DMPlanningScreen({
     super.key,
@@ -24,6 +25,7 @@ class DMPlanningScreen extends StatefulWidget {
     required this.onTabChange,
     this.dmId,
     this.dmName,
+    this.coachRole,
   });
 
   @override
@@ -1140,18 +1142,45 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               child: SizedBox(
                 width: double.infinity,
-                child: _buildActionButton(
-                  label: 'Start Coaching Session',
-                  icon: Icons.play_arrow,
-                  onTap: () {
-                    widget.onStartCoaching(
-                      DateFormat('yyyy-MM-dd').format(_selectedDate),
-                      plan.mrId,
-                      plan.mrName,
-                    );
-                  },
-                  gradient: AppColors.primaryGradientHorizontal,
-                ),
+                // Only show button if today, otherwise show message
+                child: _isToday
+                    ? _buildActionButton(
+                        label: 'Start Coaching Session',
+                        icon: Icons.play_arrow,
+                        onTap: () {
+                          widget.onStartCoaching(
+                            DateFormat('yyyy-MM-dd').format(_selectedDate),
+                            plan.mrId,
+                            plan.mrName,
+                          );
+                        },
+                        gradient: AppColors.primaryGradientHorizontal,
+                      )
+                    : Container(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        decoration: BoxDecoration(
+                          color: AppColors.gray200,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.calendar_today, color: AppColors.gray400, size: 20),
+                            const SizedBox(width: 8),
+                            Flexible(
+                              child: Text(
+                                'Coaching sessions can only be started on the current day',
+                                style: TextStyle(
+                                  color: AppColors.gray400,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
               ),
             ),
           ],
@@ -1235,20 +1264,51 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
               ],
             ),
           ),
-          // Start Button (only if MR selected)
+          // Start Button (only if MR selected and today)
           if (_selectedMR != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: SizedBox(
-                width: double.infinity,
-                child: _buildActionButton(
-                  label: 'Start Quick Session',
-                  icon: Icons.play_arrow,
-                  onTap: _handleStartCoaching,
-                  gradient: AppColors.primaryGradientHorizontal,
+            if (_isToday)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: _buildActionButton(
+                    label: 'Start Quick Session',
+                    icon: Icons.play_arrow,
+                    onTap: _handleStartCoaching,
+                    gradient: AppColors.primaryGradientHorizontal,
+                  ),
                 ),
-              ),
-            )
+              )
+            else
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  decoration: BoxDecoration(
+                    color: AppColors.gray200,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.calendar_today, color: AppColors.gray400, size: 20),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          'Coaching sessions can only be started on the current day',
+                          style: TextStyle(
+                            color: AppColors.gray400,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              )
           else
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),

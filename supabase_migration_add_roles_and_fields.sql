@@ -28,6 +28,10 @@ CHECK (role IN ('dm', 'ft', 'gm', 'pm', 'msl', 'mr'));
 ALTER TABLE users 
 ADD COLUMN IF NOT EXISTS profile_picture_url TEXT;
 
+-- إضافة Phone column
+ALTER TABLE users 
+ADD COLUMN IF NOT EXISTS phone VARCHAR(20);
+
 -- ============================================
 -- 2. UPDATE REPORTS TABLE - Add New Fields
 -- ============================================
@@ -41,6 +45,8 @@ ALTER TABLE reports
 ADD COLUMN IF NOT EXISTS brick_name VARCHAR(255),
 ADD COLUMN IF NOT EXISTS brick_location_lat DECIMAL(10, 8),
 ADD COLUMN IF NOT EXISTS brick_location_lng DECIMAL(11, 8),
+ADD COLUMN IF NOT EXISTS location_name TEXT, -- Name from Google Maps
+ADD COLUMN IF NOT EXISTS google_maps_url TEXT, -- Google Maps link
 ADD COLUMN IF NOT EXISTS visit_count INTEGER DEFAULT 1,
 ADD COLUMN IF NOT EXISTS doctors_visited TEXT; -- Comma-separated list
 

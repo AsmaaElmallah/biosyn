@@ -1290,19 +1290,48 @@ class _PMPlanningScreenState extends State<PMPlanningScreen> {
                 ],
               ),
             ),
-            // Start Coaching Button
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: SizedBox(
-                width: double.infinity,
-                child: _buildActionButton(
-                  label: 'Start Coaching Session',
-                  icon: Icons.play_arrow,
-                  onTap: _handleStartCoaching,
-                  gradient: AppColors.primaryGradientHorizontal,
+            // Start Coaching Button - Only show for MSL if today, always show for PM
+            if (widget.coachRole == 'pm' || (widget.coachRole == 'msl' && _isToday))
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: _buildActionButton(
+                    label: 'Start Coaching Session',
+                    icon: Icons.play_arrow,
+                    onTap: _handleStartCoaching,
+                    gradient: AppColors.primaryGradientHorizontal,
+                  ),
+                ),
+              )
+            else if (widget.coachRole == 'msl' && !_isToday)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  decoration: BoxDecoration(
+                    color: AppColors.gray200,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.calendar_today, color: AppColors.gray400, size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Coaching sessions can only be started on the current day',
+                        style: TextStyle(
+                          color: AppColors.gray400,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
           ],
         ),
       );
@@ -1385,19 +1414,51 @@ class _PMPlanningScreenState extends State<PMPlanningScreen> {
             ),
           ),
           // Start Button (only if DM & MR selected)
+          // For MSL: Only show if today. For PM: Always show
           if (_selectedDM != null && _selectedMR != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: SizedBox(
-                width: double.infinity,
-                child: _buildActionButton(
-                  label: 'Start Quick Session',
-                  icon: Icons.play_arrow,
-                  onTap: _handleStartCoaching,
-                  gradient: AppColors.primaryGradientHorizontal,
+            if (widget.coachRole == 'pm' || (widget.coachRole == 'msl' && _isToday))
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: _buildActionButton(
+                    label: 'Start Quick Session',
+                    icon: Icons.play_arrow,
+                    onTap: _handleStartCoaching,
+                    gradient: AppColors.primaryGradientHorizontal,
+                  ),
                 ),
-              ),
-            )
+              )
+            else if (widget.coachRole == 'msl' && !_isToday)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  decoration: BoxDecoration(
+                    color: AppColors.gray200,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.calendar_today, color: AppColors.gray400, size: 20),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          'Coaching sessions can only be started on the current day',
+                          style: TextStyle(
+                            color: AppColors.gray400,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              )
           else
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),

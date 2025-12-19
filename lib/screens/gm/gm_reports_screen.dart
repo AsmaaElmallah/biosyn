@@ -4,6 +4,8 @@ import 'package:biosyn_report_flutter/widgets/bottom_nav.dart';
 import 'package:biosyn_report_flutter/widgets/app_header.dart';
 import 'package:biosyn_report_flutter/models/coaching_report.dart';
 import 'package:biosyn_report_flutter/utils/export_utils.dart';
+import 'package:biosyn_report_flutter/services/supabase_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class GMReportsScreen extends StatefulWidget {
   final List<CoachingReport> reports;
@@ -30,6 +32,7 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
   String _dateFilter = 'all';
   bool _showFilters = false;
   CoachingReport? _selectedReport;
+  Map<String, String> _mrRoles = {}; // Map of MR ID to role
 
   List<String> get _uniqueDMs {
     // Include coach name with role for PM/MSL
@@ -96,6 +99,73 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
 
   double _calculateAvgScore(CoachingReport report) {
     return report.getAverageScore();
+  }
+
+  /// Get role label for coach role
+  String _getCoachRoleLabel(String? coachRole) {
+    if (coachRole == null || coachRole.isEmpty) return 'DM';
+    switch (coachRole.toLowerCase()) {
+      case 'dm':
+        return 'DM';
+      case 'ft':
+        return 'FT';
+      case 'pm':
+        return 'PM';
+      case 'msl':
+        return 'MSL';
+      default:
+        return coachRole.toUpperCase();
+    }
+  }
+
+  /// Get role label for MR/DM role
+  String _getRoleLabel(String role) {
+    switch (role.toLowerCase()) {
+      case 'mr':
+        return 'MR';
+      case 'dm':
+        return 'DM';
+      case 'ft':
+        return 'FT';
+      case 'pm':
+        return 'PM';
+      case 'msl':
+        return 'MSL';
+      case 'gm':
+        return 'GM';
+      default:
+        return role.toUpperCase();
+    }
+  }
+
+  /// Load MR roles from Supabase
+  Future<void> _loadMRRoles() async {
+    try {
+      final uniqueMRIds = widget.reports
+          .map((r) => r.mrId)
+          .where((id) => id.isNotEmpty)
+          .toSet()
+          .toList();
+      
+      for (final mrId in uniqueMRIds) {
+        if (!_mrRoles.containsKey(mrId)) {
+          final user = await SupabaseService.getUserById(mrId);
+          if (user != null && user['role'] != null) {
+            setState(() {
+              _mrRoles[mrId] = user['role'] as String;
+            });
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading MR roles: $e');
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMRRoles();
   }
 
   void _clearFilters() {
@@ -532,7 +602,24 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                                                       const SizedBox(width: 4),
                                                       Expanded(
                                                         child: Text(
-                                                          'DM: ${report.dmName}',
+                                                          '${_getCoachRoleLabel(report.coachRole)}: ${report.dmName}',
+                                                          style: const TextStyle(
+                                                            color: AppColors.gray600,
+                                                            fontSize: 12,
+                                                          ),
+                                                          overflow: TextOverflow.ellipsis,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                  const SizedBox(height: 2),
+                                                  Row(
+                                                    children: [
+                                                      const Icon(Icons.badge_outlined, size: 14, color: AppColors.gray400),
+                                                      const SizedBox(width: 4),
+                                                      Expanded(
+                                                        child: Text(
+                                                          '${_getRoleLabel(_mrRoles[report.mrId] ?? 'MR')}: ${report.mrName}',
                                                           style: const TextStyle(
                                                             color: AppColors.gray600,
                                                             fontSize: 12,
@@ -794,7 +881,8 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                         [
                           _buildModalInfoItem('Date', report.date),
                           _buildModalInfoItem('Average Score', '${avgScore.toStringAsFixed(2)} / 6.0'),
-                          _buildModalInfoItem('District Manager', report.dmName),
+                          _buildModalInfoItem('Coach Role', '${_getCoachRoleLabel(report.coachRole)}: ${report.dmName}'),
+                          _buildModalInfoItem('Coached Person Role', '${_getRoleLabel(_mrRoles[report.mrId] ?? 'MR')}: ${report.mrName}'),
                           _buildModalInfoItem('Medical Rep ID', report.mrId),
                         ],
                       ),
@@ -914,6 +1002,183 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                           ),
                         ],
                       ),
+                      const SizedBox(height: 24),
+                      // Location Information
+                      if (report.locationName != null || report.googleMapsUrl != null || report.brickName != null)
+                        _buildModalSection(
+                          'Location Information',
+                          [
+                            if (report.brickName != null)
+                              _buildModalInfoItem('Brick Name', report.brickName!),
+                            if (report.locationName != null)
+                              _buildModalInfoItem('Location Name', report.locationName!),
+                            if (report.brickLocationLat != null && report.brickLocationLng != null)
+                              _buildModalInfoItem('Coordinates', '${report.brickLocationLat!.toStringAsFixed(6)}, ${report.brickLocationLng!.toStringAsFixed(6)}'),
+                            if (report.googleMapsUrl != null)
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                margin: const EdgeInsets.only(bottom: 8),
+                                decoration: BoxDecoration(
+                                  color: AppColors.gray50,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const SizedBox(
+                                      width: 120,
+                                      child: Text(
+                                        'Google Maps',
+                                        style: TextStyle(
+                                          color: AppColors.gray600,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: InkWell(
+                                        onTap: () async {
+                                          final url = Uri.parse(report.googleMapsUrl!);
+                                          if (await canLaunchUrl(url)) {
+                                            await launchUrl(url, mode: LaunchMode.externalApplication);
+                                          }
+                                        },
+                                        child: Text(
+                                          'Open in Maps',
+                                          style: TextStyle(
+                                            color: AppColors.primaryBlue,
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w500,
+                                            decoration: TextDecoration.underline,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            if (report.visitCount != null)
+                              _buildModalInfoItem('Visit Count', report.visitCount.toString()),
+                            if (report.doctorsVisited != null && report.doctorsVisited!.isNotEmpty)
+                              _buildModalInfoItem('Doctors Visited', report.doctorsVisited!),
+                          ],
+                        ),
+                      // PM/MSL Specific Fields
+                      if (report.coachRole == 'pm' || report.coachRole == 'msl') ...[
+                        const SizedBox(height: 24),
+                        _buildModalSection(
+                          'PM/MSL Specific Information',
+                          [
+                            if (report.areaBrickName != null)
+                              _buildModalInfoItem('Area & Brick Name', report.areaBrickName!),
+                            if (report.typeOfVisit != null)
+                              _buildModalInfoItem('Type of Visit', report.typeOfVisit!),
+                            if (report.visitedAccountsNames != null && report.visitedAccountsNames!.isNotEmpty)
+                              _buildModalInfoItem('Visited Accounts Names', report.visitedAccountsNames!),
+                            if (report.generalFeedback != null && report.generalFeedback!.isNotEmpty)
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                margin: const EdgeInsets.only(bottom: 8),
+                                decoration: BoxDecoration(
+                                  color: AppColors.gray50,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'General Feedback and Special Insights',
+                                      style: TextStyle(
+                                        color: AppColors.gray600,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      report.generalFeedback!,
+                                      style: const TextStyle(
+                                        color: AppColors.gray900,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            if (report.customerAwareness != null)
+                              _buildModalInfoItem('Customer Awareness', report.customerAwareness!),
+                            if (report.medicalProductKnowledgeDM != null)
+                              _buildModalInfoItem('DM Medical Product Knowledge', report.medicalProductKnowledgeDM!),
+                            if (report.dmFeedbackComments != null && report.dmFeedbackComments!.isNotEmpty)
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                margin: const EdgeInsets.only(bottom: 8),
+                                decoration: BoxDecoration(
+                                  color: AppColors.gray50,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'DM Feedback Comments and Insights',
+                                      style: TextStyle(
+                                        color: AppColors.gray600,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      report.dmFeedbackComments!,
+                                      style: const TextStyle(
+                                        color: AppColors.gray900,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            if (report.patientCentricApproach != null)
+                              _buildModalScoreItem('Patient Centric Approach', report.patientCentricApproach),
+                            if (report.medicalProductKnowledgeMR != null)
+                              _buildModalScoreItem('MR Medical Product Knowledge', report.medicalProductKnowledgeMR),
+                            if (report.featureBenefits != null)
+                              _buildModalScoreItem('Feature Benefits', report.featureBenefits),
+                            if (report.closingCommitment != null)
+                              _buildModalScoreItem('Closing Commitment', report.closingCommitment),
+                            if (report.mrFeedbackComments != null && report.mrFeedbackComments!.isNotEmpty)
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                margin: const EdgeInsets.only(bottom: 8),
+                                decoration: BoxDecoration(
+                                  color: AppColors.gray50,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'MR Feedback Comments and Insights',
+                                      style: TextStyle(
+                                        color: AppColors.gray600,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      report.mrFeedbackComments!,
+                                      style: const TextStyle(
+                                        color: AppColors.gray900,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                      ],
                       const SizedBox(height: 24),
                       // Additional Info
                       Container(

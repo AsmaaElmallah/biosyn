@@ -302,9 +302,11 @@ class _AppNavigatorState extends State<AppNavigator> {
       
       debugPrint('   Total reports loaded: ${reports.length}');
       
-      setState(() {
-        _reports = reports;
-      });
+      if (mounted) {
+        setState(() {
+          _reports = reports;
+        });
+      }
       
       // Try to sync unsynced items if online
       if (isConnected) {
@@ -527,6 +529,7 @@ class _AppNavigatorState extends State<AppNavigator> {
           onTabChange: _handleTabChange,
           dmId: _userId ?? (_userName.isNotEmpty ? 'dm_${_userName.hashCode}' : 'dm_001'),
           dmName: _userName.isNotEmpty ? _userName : 'District Manager',
+          coachRole: _selectedRole == 'ft' ? 'ft' : 'dm',
         );
       case 'dm-coaching':
         return CoachingFormScreen(
@@ -745,6 +748,7 @@ class _AppNavigatorState extends State<AppNavigator> {
         return ProfileScreen(
           role: _selectedRole!,
           userName: _userName,
+          userId: _userId,
           onLogout: _handleLogout,
           activeTab: _activeTab,
           onTabChange: _handleTabChange,

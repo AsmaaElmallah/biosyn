@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:biosyn_report_flutter/theme/colors.dart';
 import 'package:biosyn_report_flutter/models/coaching_report.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class CoachingFormScreen extends StatefulWidget {
   final String date;
@@ -51,6 +52,8 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
   // Location
   Position? _currentPosition;
   bool _locationLoading = false;
+  String? _locationName;
+  String? _googleMapsUrl;
 
   @override
   void initState() {
@@ -119,17 +122,27 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
         desiredAccuracy: LocationAccuracy.high,
       );
 
+      // Get location name - will be filled from Google Maps when user confirms
+      // For now, use coordinates as placeholder
+      String? locationName = 'Location at ${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}';
+      
+      // Generate Google Maps URL
+      final googleMapsUrl = 'https://www.google.com/maps?q=${position.latitude},${position.longitude}';
+
       setState(() {
         _currentPosition = position;
         _formData['brickLocationLat'] = position.latitude.toString();
         _formData['brickLocationLng'] = position.longitude.toString();
+        _locationName = locationName;
+        _googleMapsUrl = googleMapsUrl;
+        _formData['locationName'] = locationName;
+        _formData['googleMapsUrl'] = googleMapsUrl;
         _locationLoading = false;
       });
 
+      // Show preview dialog
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Location captured: ${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}')),
-        );
+        _showLocationPreviewDialog(position, locationName, googleMapsUrl);
       }
     } catch (e) {
       setState(() => _locationLoading = false);
@@ -138,6 +151,215 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
           SnackBar(content: Text('Failed to get location: $e')),
         );
       }
+    }
+  }
+
+  Future<void> _showLocationPreviewDialog(Position position, String? locationName, String googleMapsUrl) async {
+    final locationNameController = TextEditingController(text: locationName ?? '');
+    
+    final confirmed = await showDialog<Map<String, String?>>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  gradient: AppColors.primaryGradient,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.location_on, color: Colors.white, size: 24),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Location Preview',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Coordinates Display
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryCyan.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.primaryCyan.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.gps_fixed, color: AppColors.primaryCyan, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.gray700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // Location Name Input
+                TextField(
+                  controller: locationNameController,
+                  decoration: InputDecoration(
+                    labelText: 'Location Name (from Google Maps)',
+                    hintText: 'Enter location name as shown on Google Maps...',
+                    prefixIcon: const Icon(Icons.place, color: AppColors.primaryCyan),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: AppColors.primaryCyan, width: 2),
+                    ),
+                    filled: true,
+                    fillColor: Colors.white,
+                  ),
+                  maxLines: 2,
+                ),
+                const SizedBox(height: 16),
+                // Google Maps Button
+                Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    gradient: AppColors.primaryGradientHorizontal,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.primaryBlue.withOpacity(0.3),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () async {
+                        final uri = Uri.parse(googleMapsUrl);
+                        if (await canLaunchUrl(uri)) {
+                          await launchUrl(uri, mode: LaunchMode.externalApplication);
+                        }
+                      },
+                      borderRadius: BorderRadius.circular(12),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.map, color: Colors.white, size: 22),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Open in Google Maps',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  '💡 Tip: Open Google Maps to see the location name, then enter it above',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.gray600,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, null),
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.gray600,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              ),
+              child: const Text('Cancel'),
+            ),
+            Container(
+              decoration: BoxDecoration(
+                gradient: AppColors.primaryGradientHorizontal,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.primaryCyan.withOpacity(0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () {
+                    Navigator.pop(context, {
+                      'locationName': locationNameController.text.trim(),
+                      'confirmed': 'true',
+                    });
+                  },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    child: const Text(
+                      'Confirm Location',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != null && confirmed['confirmed'] == 'true') {
+      // User confirmed, update location name
+      final newLocationName = confirmed['locationName'] ?? locationName;
+      setState(() {
+        _locationName = newLocationName;
+        _formData['locationName'] = newLocationName;
+      });
+    } else {
+      // User cancelled, clear location
+      setState(() {
+        _currentPosition = null;
+        _locationName = null;
+        _googleMapsUrl = null;
+        _formData.remove('brickLocationLat');
+        _formData.remove('brickLocationLng');
+        _formData.remove('locationName');
+        _formData.remove('googleMapsUrl');
+      });
     }
   }
 
@@ -210,6 +432,8 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
       brickName: _brickNameController.text.trim().isNotEmpty ? _brickNameController.text.trim() : null,
       brickLocationLat: _formData['brickLocationLat'] != null ? double.tryParse(_formData['brickLocationLat']!) : null,
       brickLocationLng: _formData['brickLocationLng'] != null ? double.tryParse(_formData['brickLocationLng']!) : null,
+      locationName: _formData['locationName'],
+      googleMapsUrl: _formData['googleMapsUrl'],
       visitCount: _formData['visitCount'] != null ? int.tryParse(_formData['visitCount']!) : 1,
       doctorsVisited: _doctorsVisitedController.text.trim().isNotEmpty ? _doctorsVisitedController.text.trim() : null,
       punctuality: _formData['punctuality'],
@@ -612,12 +836,58 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              if (_currentPosition != null)
+              if (_currentPosition != null) ...[
                 Text(
                   'Lat: ${_currentPosition!.latitude.toStringAsFixed(6)}, Lng: ${_currentPosition!.longitude.toStringAsFixed(6)}',
                   style: const TextStyle(color: AppColors.gray600),
                 ),
-              const SizedBox(height: 12),
+                if (_locationName != null) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryCyan.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppColors.primaryCyan.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.place, color: AppColors.primaryCyan, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _locationName!,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.gray700,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 2,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                if (_googleMapsUrl != null) ...[
+                  const SizedBox(height: 8),
+                  ElevatedButton.icon(
+                    onPressed: () async {
+                      final uri = Uri.parse(_googleMapsUrl!);
+                      if (await canLaunchUrl(uri)) {
+                        await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      }
+                    },
+                    icon: const Icon(Icons.map, size: 18),
+                    label: const Text('View on Google Maps'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primaryCyan,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+              ],
               ElevatedButton.icon(
                 onPressed: _locationLoading ? null : _getCurrentLocation,
                 icon: _locationLoading

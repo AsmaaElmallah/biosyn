@@ -13,8 +13,8 @@ class AuthService {
       // Try Supabase authentication first
       final user = await SupabaseService.signIn(username, password);
       
-      // Save session locally
-      await _saveSession(user);
+      // Save session locally with password
+      await _saveSession(user, password: password);
       
       return user;
     } catch (e) {
@@ -76,10 +76,14 @@ class AuthService {
   }
 
   /// Save session locally
-  static Future<void> _saveSession(Map<String, dynamic> user) async {
+  static Future<void> _saveSession(Map<String, dynamic> user, {String? password}) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_sessionKey, DateTime.now().toIso8601String());
     await prefs.setString(_userKey, json.encode(user));
+    // Save password for later use in Supabase Auth
+    if (password != null && password.isNotEmpty) {
+      await prefs.setString('biosyn_password', password);
+    }
   }
 
   /// Get user role

@@ -115,6 +115,27 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
     return _colorPalette[index % _colorPalette.length];
   }
 
+  /// Get role label for display
+  String _getRoleLabel(String? role) {
+    if (role == null || role.isEmpty) return 'DM';
+    switch (role.toLowerCase()) {
+      case 'dm':
+        return 'DM';
+      case 'ft':
+        return 'FT';
+      case 'pm':
+        return 'PM';
+      case 'msl':
+        return 'MSL';
+      case 'mr':
+        return 'MR';
+      case 'gm':
+        return 'GM';
+      default:
+        return role.toUpperCase();
+    }
+  }
+
   List<Map<String, dynamic>> _getFilteredPlans() {
     var plans = _allPlans;
     
@@ -193,7 +214,7 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
             // Header
             const AppHeader(
               title: 'View Plans',
-              subtitle: 'View all District Managers\' monthly plans',
+              subtitle: 'View all Coaches\' monthly plans',
             ),
             // Content
             Expanded(
@@ -232,8 +253,9 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
                                     final dmPlans = entry.value;
                                     final dmIndex = _allDMs.indexWhere((d) => d['id'] == dmId);
                                     final color = _getColorForDM(dmIndex >= 0 ? dmIndex : 0);
+                                    final dmRole = dmIndex >= 0 ? _allDMs[dmIndex]['role']?.toString() : null;
                                     
-                                    return _buildDMPlanCard(dmName, dmPlans, color);
+                                    return _buildDMPlanCard(dmName, dmPlans, color, dmRole);
                                   }),
                                 
                                 // Bottom padding
@@ -315,7 +337,7 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
               Icon(Icons.filter_list, color: AppColors.primaryBlue, size: 20),
               SizedBox(width: 8),
               Text(
-                'Filter by District Manager',
+                'Filter by Coach',
                 style: TextStyle(
                   color: AppColors.gray700,
                   fontSize: 14,
@@ -345,11 +367,11 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
               fillColor: AppColors.gray50,
               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             ),
-            hint: const Text('All District Managers'),
+            hint: const Text('All Coaches'),
             items: [
               const DropdownMenuItem<String>(
                 value: null,
-                child: Text('All District Managers'),
+                child: Text('All Coaches'),
               ),
               ..._allDMs.asMap().entries.map((entry) {
                 final dm = entry.value;
@@ -369,7 +391,7 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          dm['name']?.toString() ?? 'Unknown',
+                          '${dm['name']?.toString() ?? 'Unknown'} (${_getRoleLabel(dm['role']?.toString())})',
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -442,7 +464,7 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
     );
   }
 
-  Widget _buildDMPlanCard(String dmName, List<Map<String, dynamic>> plans, Color color) {
+  Widget _buildDMPlanCard(String dmName, List<Map<String, dynamic>> plans, Color color, String? role) {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
@@ -494,15 +516,39 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        dmName,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.gray900,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              dmName,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.gray900,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: color.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: color, width: 1),
+                            ),
+                            child: Text(
+                              _getRoleLabel(role),
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: color,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
+                      const SizedBox(height: 2),
                       Text(
                         '${plans.length} planned visits',
                         style: TextStyle(
@@ -710,7 +756,7 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'District Managers haven\'t created any plans for this month yet.',
+            'Coaches haven\'t created any plans for this month yet.',
             style: TextStyle(
               fontSize: 14,
               color: AppColors.gray400,

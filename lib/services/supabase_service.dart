@@ -46,6 +46,8 @@ class SupabaseService {
         'brick_name': report.brickName,
         'brick_location_lat': report.brickLocationLat,
         'brick_location_lng': report.brickLocationLng,
+        'location_name': report.locationName,
+        'google_maps_url': report.googleMapsUrl,
         'visit_count': report.visitCount,
         'doctors_visited': report.doctorsVisited,
         // DM/FT Form Fields
@@ -93,8 +95,12 @@ class SupabaseService {
       // Log the data being sent for debugging
       debugPrint('📤 Saving report to Supabase:');
       debugPrint('   dm_id: ${report.dmId}');
+      debugPrint('   dm_name: ${report.dmName}');
       debugPrint('   mr_id: ${report.mrId}');
+      debugPrint('   mr_name: ${report.mrName}');
       debugPrint('   date: ${report.date}');
+      debugPrint('   coach_role: ${report.coachRole}');
+      debugPrint('   Full report data keys: ${reportData.keys.toList()}');
       
       try {
         final response = await client!.from('reports').insert(reportData).select();
@@ -126,16 +132,43 @@ class SupabaseService {
       
       // Filter by coach_role if provided, otherwise filter by dm_id
       if (coachRole != null) {
+        // For PM/MSL/FT: filter by coach_role AND dm_id (where dm_id is the coach ID)
         query = query.eq('coach_role', coachRole).eq('dm_id', coachId);
         debugPrint('   🔍 Filter: coach_role=$coachRole AND dm_id=$coachId');
       } else {
-        query = query.eq('dm_id', coachId);
-        debugPrint('   🔍 Filter: dm_id=$coachId');
+        // For DM, get reports where coach_role is 'dm' or null
+        query = query.eq('dm_id', coachId).or('coach_role.is.null,coach_role.eq.dm');
+        debugPrint('   🔍 Filter: dm_id=$coachId AND (coach_role IS NULL OR coach_role = dm)');
       }
       
       final response = await query.order('date', ascending: false);
       
       debugPrint('   ✅ Got ${(response as List).length} reports from Supabase');
+      
+      // Log all reports details for debugging
+      if ((response as List).isNotEmpty) {
+        debugPrint('   📋 All reports details:');
+        for (int i = 0; i < (response as List).length && i < 5; i++) {
+          final report = (response as List)[i];
+          debugPrint('      Report $i:');
+          debugPrint('         dm_id: ${report['dm_id']}');
+          debugPrint('         coach_role: ${report['coach_role']}');
+          debugPrint('         date: ${report['date']}');
+          debugPrint('         mr_id: ${report['mr_id']}');
+        }
+      } else {
+        debugPrint('   ⚠️ No reports found with filters: coachRole=$coachRole, coachId=$coachId');
+        // Try to see what reports exist
+        try {
+          final allReports = await client!.from('reports').select('dm_id, coach_role, date').limit(10);
+          debugPrint('   📊 Sample of all reports in database:');
+          for (final r in (allReports as List).take(5)) {
+            debugPrint('      dm_id: ${r['dm_id']}, coach_role: ${r['coach_role']}, date: ${r['date']}');
+          }
+        } catch (e) {
+          debugPrint('   ❌ Could not fetch sample reports: $e');
+        }
+      }
 
       return (response as List)
           .map((json) => CoachingReport.fromSupabaseJson(json))
@@ -535,6 +568,26 @@ class SupabaseService {
     }
   }
 
+  /// Get user by ID
+  static Future<Map<String, dynamic>?> getUserById(String userId) async {
+    try {
+      if (!isInitialized) {
+        return null; // Supabase not initialized
+      }
+      
+      final response = await client!
+          .from('users')
+          .select()
+          .eq('id', userId)
+          .maybeSingle();
+
+      return response;
+    } catch (e) {
+      debugPrint('❌ Error getting user by ID: $e');
+      return null;
+    }
+  }
+
   /// Get all DMs (for GM)
   static Future<List<Map<String, dynamic>>> getAllDMs() async {
     try {
@@ -654,6 +707,7 @@ class SupabaseService {
     String? username,
     String? password,
     String? email,
+    String? phone,
     String? role,
     String? status,
     String? profilePictureUrl,
@@ -671,6 +725,7 @@ class SupabaseService {
         updates['password'] = password;
       }
       if (email != null) updates['email'] = email;
+      if (phone != null) updates['phone'] = phone;
       if (role != null) updates['role'] = role;
       if (status != null) updates['status'] = status;
       if (profilePictureUrl != null) updates['profile_picture_url'] = profilePictureUrl;
@@ -731,7 +786,35 @@ class SupabaseService {
                 .single();
             
             final email = userData['email'] ?? '${username}@biosyn.com';
-            final password = userData['password'] ?? userData['password_hash'] ?? '';
+            
+            // Try to get password from SharedPreferences first (saved during login)
+            final prefs = await SharedPreferences.getInstance();
+            String? password = prefs.getString('biosyn_password');
+            
+            // If not in SharedPreferences, try to get from database
+            if (password == null || password.isEmpty) {
+              password = userData['password'] ?? userData['password_hash'] ?? '';
+            }
+            
+            // If still empty or too short, generate a secure password
+            if (password == null || password.isEmpty || password.length < 6) {
+              debugPrint('   ⚠️ Password is empty or too short, generating secure password...');
+              // Generate a secure password based on user ID and username
+              final userId = authService['id'] ?? '';
+              final securePassword = '${userId}_${username}_${DateTime.now().millisecondsSinceEpoch}';
+              password = securePassword.substring(0, securePassword.length > 20 ? 20 : securePassword.length);
+              // Ensure minimum length of 6
+              if (password.length < 6) {
+                password = password.padRight(6, '0');
+              }
+              debugPrint('   ✅ Generated secure password (length: ${password.length})');
+            }
+            
+            // Ensure password is not null and has minimum length
+            final finalPassword = password;
+            if (finalPassword.isEmpty) {
+              throw Exception('Could not get or generate password for authentication');
+            }
             
             debugPrint('   🔐 Attempting to sign in to Supabase Auth...');
             
@@ -739,7 +822,7 @@ class SupabaseService {
             try {
               await client!.auth.signInWithPassword(
                 email: email,
-                password: password,
+                password: finalPassword,
               );
               currentUser = client!.auth.currentUser;
               debugPrint('   ✅ Signed in to Supabase Auth successfully');
@@ -762,7 +845,7 @@ class SupabaseService {
                   try {
                     await client!.auth.signInWithPassword(
                       email: email,
-                      password: password,
+                      password: finalPassword,
                     );
                     currentUser = client!.auth.currentUser;
                     debugPrint('   ✅ Signed in after resending confirmation');
@@ -781,7 +864,7 @@ class SupabaseService {
                   debugPrint('   🔄 Attempting to create user in Supabase Auth...');
                   final signUpResponse = await client!.auth.signUp(
                     email: email,
-                    password: password,
+                    password: finalPassword,
                     data: {
                       'username': username,
                       'name': userData['name'],
@@ -795,7 +878,7 @@ class SupabaseService {
                     try {
                       await client!.auth.signInWithPassword(
                         email: email,
-                        password: password,
+                        password: finalPassword,
                       );
                       currentUser = client!.auth.currentUser;
                       debugPrint('   ✅ Signed in to Supabase Auth');
