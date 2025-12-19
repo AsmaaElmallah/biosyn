@@ -55,6 +55,9 @@ class CoachingReport {
   final String? featureBenefits; // 1-6 scale
   final String? closingCommitment; // 1-6 scale
   final String? mrFeedbackComments; // "MR Feedback Comments and Insights"
+  
+  // Quick Session Flag
+  final bool? isQuickSession; // True if session started without a plan
 
   CoachingReport({
     required this.date,
@@ -105,6 +108,7 @@ class CoachingReport {
     this.featureBenefits,
     this.closingCommitment,
     this.mrFeedbackComments,
+    this.isQuickSession,
   });
 
   Map<String, dynamic> toJson() {
@@ -157,6 +161,7 @@ class CoachingReport {
       'featureBenefits': featureBenefits,
       'closingCommitment': closingCommitment,
       'mrFeedbackComments': mrFeedbackComments,
+      'isQuickSession': isQuickSession,
     };
   }
 
@@ -210,6 +215,7 @@ class CoachingReport {
       featureBenefits: json['featureBenefits'],
       closingCommitment: json['closingCommitment'],
       mrFeedbackComments: json['mrFeedbackComments'],
+      isQuickSession: json['isQuickSession'] == true || json['isQuickSession'] == 1,
     );
   }
 
@@ -264,6 +270,7 @@ class CoachingReport {
       featureBenefits: json['feature_benefits']?.toString(),
       closingCommitment: json['closing_commitment']?.toString(),
       mrFeedbackComments: json['mr_feedback_comments']?.toString(),
+      isQuickSession: json['is_quick_session'] == true || json['is_quick_session'] == 1,
     );
   }
 

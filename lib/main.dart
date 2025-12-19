@@ -91,6 +91,7 @@ class _AppNavigatorState extends State<AppNavigator> {
   String? _coachingDate;
   String? _coachingMrId;
   String? _coachingMrName;
+  bool _isQuickSession = false;
   StreamSubscription<ConnectivityResult>? _connectivitySubscription;
 
   @override
@@ -517,11 +518,12 @@ class _AppNavigatorState extends State<AppNavigator> {
         );
       case 'dm-planning':
         return DMPlanningScreen(
-          onStartCoaching: (date, mrId, mrName) {
+          onStartCoaching: (date, mrId, mrName, isQuickSession) {
             setState(() {
               _coachingDate = date;
               _coachingMrId = mrId;
               _coachingMrName = mrName;
+              _isQuickSession = isQuickSession;
               _currentScreen = 'dm-coaching';
             });
           },
@@ -539,6 +541,7 @@ class _AppNavigatorState extends State<AppNavigator> {
           dmId: _userId ?? (_userName.isNotEmpty ? 'dm_${_userName.hashCode}' : 'dm_001'), // Use UUID from Supabase
           dmName: _userName,
           coachRole: _selectedRole == 'ft' ? 'ft' : 'dm', // Pass the actual role
+          isQuickSession: _isQuickSession,
           onSubmit: (report) async {
             // Time Restriction: Cannot submit after 12:00 AM (midnight)
             final hour = DateTime.now().hour;
@@ -561,6 +564,7 @@ class _AppNavigatorState extends State<AppNavigator> {
                 _coachingDate = null;
                 _coachingMrId = null;
                 _coachingMrName = null;
+                _isQuickSession = false;
               });
             }
           },
@@ -570,6 +574,7 @@ class _AppNavigatorState extends State<AppNavigator> {
               _coachingDate = null;
               _coachingMrId = null;
               _coachingMrName = null;
+              _isQuickSession = false;
             });
           },
         );

@@ -36,6 +36,26 @@ class GMDashboardScreen extends StatelessWidget {
     }
   }
 
+  /// Check if coach has any quick sessions
+  bool _hasQuickSessionsForCoach(String coachName) {
+    // Extract clean name (remove role suffix if exists)
+    String cleanName = coachName;
+    if (cleanName.contains(' (')) {
+      cleanName = cleanName.substring(0, cleanName.indexOf(' ('));
+    }
+    
+    return allReports.any((r) {
+      final reportCoachName = r.coachRole != null && r.coachRole!.isNotEmpty
+          ? '${r.dmName} (${r.coachRole!.toUpperCase()})'
+          : r.dmName;
+      String reportCleanName = reportCoachName;
+      if (reportCleanName.contains(' (')) {
+        reportCleanName = reportCleanName.substring(0, reportCleanName.indexOf(' ('));
+      }
+      return reportCleanName == cleanName && r.isQuickSession == true && r.mrId.isNotEmpty;
+    });
+  }
+
   double _calculateAvgScore(CoachingReport report) {
     return report.getAverageScore();
   }
@@ -677,15 +697,37 @@ class GMDashboardScreen extends StatelessWidget {
                                                 child: Column(
                                                   crossAxisAlignment: CrossAxisAlignment.start,
                                                   children: [
-                                                    Text(
-                                                      dm['fullName'] ?? dm['name'],
-                                                      style: const TextStyle(
-                                                        fontSize: 16,
-                                                        fontWeight: FontWeight.w600,
-                                                        color: AppColors.gray900,
-                                                      ),
-                                                      overflow: TextOverflow.ellipsis,
-                                                      maxLines: 1,
+                                                    Row(
+                                                      children: [
+                                                        Expanded(
+                                                          child: Text(
+                                                            dm['fullName'] ?? dm['name'],
+                                                            style: const TextStyle(
+                                                              fontSize: 16,
+                                                              fontWeight: FontWeight.w600,
+                                                              color: AppColors.gray900,
+                                                            ),
+                                                            overflow: TextOverflow.ellipsis,
+                                                            maxLines: 1,
+                                                          ),
+                                                        ),
+                                                        // Quick Session indicator (if any reports are quick sessions)
+                                                        if (_hasQuickSessionsForCoach(dm['fullName'] ?? dm['name']))
+                                                          Container(
+                                                            margin: const EdgeInsets.only(left: 8),
+                                                            padding: const EdgeInsets.all(4),
+                                                            decoration: BoxDecoration(
+                                                              color: AppColors.error.withOpacity(0.1),
+                                                              shape: BoxShape.circle,
+                                                              border: Border.all(color: AppColors.error, width: 1.5),
+                                                            ),
+                                                            child: const Icon(
+                                                              Icons.close,
+                                                              color: AppColors.error,
+                                                              size: 12,
+                                                            ),
+                                                          ),
+                                                      ],
                                                     ),
                                                     const SizedBox(height: 2),
                                                     Text(

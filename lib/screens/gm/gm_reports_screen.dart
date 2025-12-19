@@ -646,6 +646,22 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                                                 ],
                                               ),
                                             ),
+                                            // Quick Session Badge (if applicable)
+                                            if (report.isQuickSession == true)
+                                              Container(
+                                                margin: const EdgeInsets.only(right: 8),
+                                                padding: const EdgeInsets.all(6),
+                                                decoration: BoxDecoration(
+                                                  color: AppColors.error.withOpacity(0.1),
+                                                  shape: BoxShape.circle,
+                                                  border: Border.all(color: AppColors.error, width: 2),
+                                                ),
+                                                child: const Icon(
+                                                  Icons.close,
+                                                  color: AppColors.error,
+                                                  size: 16,
+                                                ),
+                                              ),
                                             // Score Badge
                                             Container(
                                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -875,6 +891,57 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      // Quick Session Warning (if applicable)
+                      if (report.isQuickSession == true)
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 24),
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: AppColors.error.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: AppColors.error, width: 2),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: AppColors.error,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.close,
+                                  color: Colors.white,
+                                  size: 20,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'Quick Coaching Session',
+                                      style: TextStyle(
+                                        color: AppColors.error,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'This session was started without a scheduled plan for this date.',
+                                      style: TextStyle(
+                                        color: AppColors.error.withOpacity(0.8),
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       // Basic Info
                       _buildModalSection(
                         'Basic Information',
@@ -884,6 +951,8 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                           _buildModalInfoItem('Coach Role', '${_getCoachRoleLabel(report.coachRole)}: ${report.dmName}'),
                           _buildModalInfoItem('Coached Person Role', '${_getRoleLabel(_mrRoles[report.mrId] ?? 'MR')}: ${report.mrName}'),
                           _buildModalInfoItem('Medical Rep ID', report.mrId),
+                          if (report.isQuickSession == true)
+                            _buildModalInfoItem('Session Type', 'Quick Session (No Plan)'),
                         ],
                       ),
                       const SizedBox(height: 24),

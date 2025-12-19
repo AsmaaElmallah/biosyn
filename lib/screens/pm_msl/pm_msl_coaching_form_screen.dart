@@ -14,6 +14,7 @@ class PMMSLCoachingFormScreen extends StatefulWidget {
   final String? dmName; // Optional - if provided, pre-select DM
   final String? mrId; // Optional - if provided, pre-select MR
   final String? mrName; // Optional - if provided, pre-select MR
+  final bool isQuickSession; // True if started without a plan
   final Function(CoachingReport) onSubmit;
   final VoidCallback onBack;
 
@@ -27,6 +28,7 @@ class PMMSLCoachingFormScreen extends StatefulWidget {
     this.dmName,
     this.mrId,
     this.mrName,
+    this.isQuickSession = false,
     required this.onSubmit,
     required this.onBack,
   });
@@ -520,6 +522,7 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
         featureBenefits: _formData['featureBenefits'],
         closingCommitment: _formData['closingCommitment'],
         mrFeedbackComments: _mrFeedbackCommentsController.text.trim().isNotEmpty ? _mrFeedbackCommentsController.text.trim() : null,
+        isQuickSession: widget.isQuickSession,
       );
     }
 

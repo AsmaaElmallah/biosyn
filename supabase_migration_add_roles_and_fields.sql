@@ -63,7 +63,8 @@ ADD COLUMN IF NOT EXISTS patient_centric_approach VARCHAR(10), -- 1-6 scale
 ADD COLUMN IF NOT EXISTS medical_product_knowledge_mr VARCHAR(10), -- 1-6 scale
 ADD COLUMN IF NOT EXISTS feature_benefits VARCHAR(10), -- 1-6 scale
 ADD COLUMN IF NOT EXISTS closing_commitment VARCHAR(10), -- 1-6 scale
-ADD COLUMN IF NOT EXISTS mr_feedback_comments TEXT; -- For PM/MSL: "MR Feedback Comments and Insights"
+ADD COLUMN IF NOT EXISTS mr_feedback_comments TEXT, -- For PM/MSL: "MR Feedback Comments and Insights"
+ADD COLUMN IF NOT EXISTS is_quick_session BOOLEAN DEFAULT FALSE; -- True if session started without a plan
 
 -- ============================================
 -- 3. UPDATE RLS POLICIES - Add Support for New Roles

@@ -11,6 +11,7 @@ class CoachingFormScreen extends StatefulWidget {
   final String dmId;
   final String dmName;
   final String coachRole; // 'dm' or 'ft'
+  final bool isQuickSession; // True if started without a plan
   final Function(CoachingReport) onSubmit;
   final VoidCallback onBack;
 
@@ -22,6 +23,7 @@ class CoachingFormScreen extends StatefulWidget {
     required this.dmId,
     required this.dmName,
     required this.coachRole, // 'dm' or 'ft'
+    this.isQuickSession = false,
     required this.onSubmit,
     required this.onBack,
   });
@@ -459,6 +461,7 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
       strengths: _strengthsController.text.isNotEmpty ? _strengthsController.text : _formData['strengths'],
       improvements: _improvementsController.text.isNotEmpty ? _improvementsController.text : _formData['improvements'],
       filledWithMR: _formData['filledWithMR'],
+      isQuickSession: widget.isQuickSession,
     );
 
     widget.onSubmit(report);

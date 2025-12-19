@@ -11,7 +11,7 @@ import 'package:biosyn_report_flutter/services/plan_service.dart';
 import 'package:biosyn_report_flutter/services/supabase_service.dart';
 
 class DMPlanningScreen extends StatefulWidget {
-  final Function(String, String, String) onStartCoaching;
+  final Function(String, String, String, bool) onStartCoaching; // Added isQuickSession parameter
   final String activeTab;
   final Function(String) onTabChange;
   final String? dmId;
@@ -33,8 +33,8 @@ class DMPlanningScreen extends StatefulWidget {
 }
 
 class _DMPlanningScreenState extends State<DMPlanningScreen> {
-  DateTime _selectedDate = DateTime.now();
-  DateTime _focusedDay = DateTime.now();
+  late DateTime _selectedDate;
+  late DateTime _focusedDay;
   String? _selectedMR;
   String _view = 'today';
   List<Plan> _plans = [];
@@ -42,6 +42,17 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
   List<Map<String, String>> _medicalReps = [];
   bool _isMrLoading = true;
   String? _mrError;
+
+  @override
+  void initState() {
+    super.initState();
+    final today = DateTime.now();
+    // For Today view, default to today. For Schedule view, default to tomorrow
+    _selectedDate = today;
+    _focusedDay = today;
+    _loadMedicalReps();
+    _loadPlans();
+  }
 
   String get _dmId => widget.dmId ?? 'dm_001';
   String get _dmName => widget.dmName ?? 'District Manager';
@@ -54,13 +65,6 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
       orElse: () => {'id': '', 'name': 'Medical Rep'},
     );
     return mr['name'] ?? 'Medical Rep';
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _loadPlans();
-    _loadMedicalReps();
   }
 
   Future<void> _loadPlans() async {
@@ -133,7 +137,7 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
         _selectedDate.day == now.day;
   }
 
-  void _handleStartCoaching() {
+  Future<void> _handleStartCoaching() async {
     if (_selectedMR == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select a Medical Representative')),
@@ -145,10 +149,17 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
       (m) => m['id'] == _selectedMR,
       orElse: () => {'id': _selectedMR!, 'name': 'Medical Rep'},
     );
+    
+    // Check if plan exists for today
+    final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+    final plan = await PlanService.getPlanByDate(_dmId, dateStr);
+    final isQuickSession = plan == null;
+    
     widget.onStartCoaching(
-      DateFormat('yyyy-MM-dd').format(_selectedDate),
+      dateStr,
       mr['id']!,
       mr['name']!,
+      isQuickSession,
     );
   }
 
@@ -156,6 +167,32 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
     if (_selectedMR == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select a Medical Representative')),
+      );
+      return;
+    }
+
+    // Only allow saving plans in Schedule view, not Today view
+    if (_view == 'today') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('To create a plan, please use the Schedule tab. Today tab is for Quick Sessions only.'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
+    // Check if selected date is today or in the past
+    final today = DateTime.now();
+    final selectedDateOnly = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
+    final todayOnly = DateTime(today.year, today.month, today.day);
+    
+    if (selectedDateOnly.isBefore(todayOnly) || selectedDateOnly.isAtSameMomentAs(todayOnly)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Plans can only be created for future dates. Please select a date after today.'),
+          duration: Duration(seconds: 3),
+        ),
       );
       return;
     }
@@ -342,21 +379,32 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
                                     selectedDayPredicate: (day) {
                                       return isSameDay(_selectedDate, day);
                                     },
+                                    enabledDayPredicate: (day) {
+                                      // Only allow future dates (after today)
+                                      final today = DateTime.now();
+                                      final dayOnly = DateTime(day.year, day.month, day.day);
+                                      final todayOnly = DateTime(today.year, today.month, today.day);
+                                      return dayOnly.isAfter(todayOnly);
+                                    },
                                     eventLoader: _getPlansForDay,
-                                    calendarStyle: const CalendarStyle(
+                                    calendarStyle: CalendarStyle(
                                       outsideDaysVisible: false,
-                                      weekendTextStyle: TextStyle(color: AppColors.primaryBlue),
-                                      selectedDecoration: BoxDecoration(
+                                      weekendTextStyle: const TextStyle(color: AppColors.primaryBlue),
+                                      selectedDecoration: const BoxDecoration(
                                         color: AppColors.primaryCyan,
                                         shape: BoxShape.circle,
                                       ),
-                                      todayDecoration: BoxDecoration(
+                                      todayDecoration: const BoxDecoration(
                                         color: AppColors.primaryBlue,
                                         shape: BoxShape.circle,
                                       ),
-                                      markerDecoration: BoxDecoration(
+                                      markerDecoration: const BoxDecoration(
                                         color: AppColors.primaryCyan,
                                         shape: BoxShape.circle,
+                                      ),
+                                      disabledTextStyle: TextStyle(
+                                        color: AppColors.gray300,
+                                        decoration: TextDecoration.lineThrough,
                                       ),
                                     ),
                                     headerStyle: const HeaderStyle(
@@ -364,6 +412,21 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
                                       titleCentered: true,
                                     ),
                                     onDaySelected: (selectedDay, focusedDay) {
+                                      // Only allow future dates
+                                      final today = DateTime.now();
+                                      final dayOnly = DateTime(selectedDay.year, selectedDay.month, selectedDay.day);
+                                      final todayOnly = DateTime(today.year, today.month, today.day);
+                                      
+                                      if (dayOnly.isBefore(todayOnly) || dayOnly.isAtSameMomentAs(todayOnly)) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(
+                                            content: Text('Plans can only be created for future dates. Please select a date after today.'),
+                                            duration: Duration(seconds: 3),
+                                          ),
+                                        );
+                                        return;
+                                      }
+                                      
                                       setState(() {
                                         _selectedDate = selectedDay;
                                         _focusedDay = focusedDay;
@@ -399,7 +462,7 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
                             ),
                             const SizedBox(height: 24),
                           ],
-                          // Date Selection (Today mode)
+                          // Date Selection (Today mode) - Allow today for Quick Session
                           if (_view == 'today') ...[
                             _buildCard(
                               child: Column(
@@ -423,13 +486,40 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
                                   const SizedBox(height: 16),
                                   InkWell(
                                     onTap: () async {
+                                      final today = DateTime.now();
+                                      // In Today view, allow today for Quick Session
                                       final picked = await showDatePicker(
                                         context: context,
                                         initialDate: _selectedDate,
-                                        firstDate: DateTime(2020),
+                                        firstDate: today, // Allow today
                                         lastDate: DateTime(2030),
                                       );
                                       if (picked != null) {
+                                        final pickedOnly = DateTime(picked.year, picked.month, picked.day);
+                                        final todayOnly = DateTime(today.year, today.month, today.day);
+                                        
+                                        // In Today view, only allow today (for Quick Session)
+                                        if (pickedOnly.isBefore(todayOnly)) {
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            const SnackBar(
+                                              content: Text('Cannot select past dates. Please select today for Quick Session.'),
+                                              duration: Duration(seconds: 3),
+                                            ),
+                                          );
+                                          return;
+                                        }
+                                        
+                                        // If future date selected in Today view, switch to Schedule view
+                                        if (pickedOnly.isAfter(todayOnly)) {
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            const SnackBar(
+                                              content: Text('For future dates, please use the Schedule tab to create plans.'),
+                                              duration: Duration(seconds: 3),
+                                            ),
+                                          );
+                                          return;
+                                        }
+                                        
                                         setState(() {
                                           _selectedDate = picked;
                                         });
@@ -810,10 +900,20 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
       onTap: () {
         setState(() {
           _view = value;
+          // Adjust selected date based on view
+          final today = DateTime.now();
+          if (value == 'today') {
+            // Today view: set to today for Quick Session
+            _selectedDate = today;
+            _focusedDay = today;
+          } else {
+            // Schedule view: set to tomorrow (no plans for today)
+            final tomorrow = DateTime(today.year, today.month, today.day + 1);
+            _selectedDate = tomorrow;
+            _focusedDay = tomorrow;
+          }
         });
-        if (_view == 'schedule') {
-          _loadPlanForSelectedDate();
-        }
+        _loadPlanForSelectedDate();
       },
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12),
@@ -1152,6 +1252,7 @@ class _DMPlanningScreenState extends State<DMPlanningScreen> {
                             DateFormat('yyyy-MM-dd').format(_selectedDate),
                             plan.mrId,
                             plan.mrName,
+                            false, // Has plan, so not a quick session
                           );
                         },
                         gradient: AppColors.primaryGradientHorizontal,

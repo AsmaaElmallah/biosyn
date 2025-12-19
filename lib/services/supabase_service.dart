@@ -31,6 +31,32 @@ class SupabaseService {
         throw Exception('Supabase not initialized');
       }
       
+      // Check if plan exists for this date and coach
+      // If no plan exists and date is today, mark as quick session
+      bool isQuickSession = false;
+      if (report.isQuickSession == true) {
+        isQuickSession = true;
+      } else {
+        // Check if date is today and no plan exists
+        final today = DateTime.now();
+        final reportDate = DateTime.tryParse(report.date);
+        if (reportDate != null) {
+          final todayOnly = DateTime(today.year, today.month, today.day);
+          final reportDateOnly = DateTime(reportDate.year, reportDate.month, reportDate.day);
+          
+          if (reportDateOnly.isAtSameMomentAs(todayOnly)) {
+            // Check if plan exists
+            try {
+              final plan = await getPlanByDate(report.dmId, report.date);
+              isQuickSession = plan == null;
+            } catch (e) {
+              // If check fails, assume it's a quick session
+              isQuickSession = true;
+            }
+          }
+        }
+      }
+      
       // Prepare data for Supabase
       // Note: Don't send 'id' - let Supabase generate UUID automatically
       // Note: dm_id must be UUID from users table, not generated string
@@ -88,6 +114,7 @@ class SupabaseService {
         'closing_commitment': report.closingCommitment,
         'mr_feedback_comments': report.mrFeedbackComments,
         'average_score': report.getAverageScore(),
+        'is_quick_session': isQuickSession,
         'synced': true,
       };
       
@@ -256,6 +283,26 @@ class SupabaseService {
       });
     } catch (e) {
       throw Exception('Failed to save plan: $e');
+    }
+  }
+
+  /// Get plan for a specific date
+  static Future<Map<String, dynamic>?> getPlanByDate(String dmId, String date) async {
+    try {
+      if (!isInitialized) {
+        return null;
+      }
+      final response = await client!
+          .from('plans')
+          .select()
+          .eq('dm_id', dmId)
+          .eq('date', date)
+          .maybeSingle();
+
+      return response;
+    } catch (e) {
+      debugPrint('❌ Error getting plan by date: $e');
+      return null;
     }
   }
 
