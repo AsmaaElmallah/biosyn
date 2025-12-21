@@ -505,10 +505,21 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
       required String mrName,
       String? dmId,
       String? dmName,
+      required bool isDMReport, // New parameter to distinguish DM report from MR report
     }) {
+      final finalDmId = dmId ?? widget.coachId;
+      debugPrint('   📝 createReport called:');
+      debugPrint('      mrId: $mrId');
+      debugPrint('      mrName: $mrName');
+      debugPrint('      dmId parameter: $dmId');
+      debugPrint('      widget.coachId: ${widget.coachId}');
+      debugPrint('      final dmId: $finalDmId');
+      debugPrint('      coachRole: ${widget.coachRole}');
+      debugPrint('      isDMReport: $isDMReport');
+      
       return CoachingReport(
         date: widget.date,
-        dmId: dmId ?? widget.coachId, // For Double: DM report uses selected DM ID, MR report uses coach ID
+        dmId: finalDmId, // For Double: DM report uses selected DM ID, MR report uses coach ID
         dmName: dmName ?? widget.coachName,
         mrId: mrId,
         mrName: mrName,
@@ -526,20 +537,22 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
         typeOfVisit: _formData['typeOfVisit'],
         visitedAccountsNames: null, // Removed - Visit Details section deleted
         generalFeedback: _generalFeedbackController.text.trim().isNotEmpty ? _generalFeedbackController.text.trim() : null,
-        customerAwareness: _formData['customerAwareness'],
-        medicalProductKnowledgeDM: _formData['medicalProductKnowledgeDM'],
-        dmFeedbackComments: _dmFeedbackCommentsController.text.trim().isNotEmpty ? _dmFeedbackCommentsController.text.trim() : null,
-        // MR Feedback
-        punctuality: _formData['punctuality'],
-        dressCode: _formData['dressCode'],
-        pharmacyFeedback: _formData['pharmacyFeedback'],
-        reviewProfile: _formData['reviewProfile'],
-        patientCentricApproach: _formData['patientCentricApproach'],
-        medicalProductKnowledgeMR: _formData['medicalProductKnowledgeMR'],
-        engaging: _formData['engaging'],
-        featureBenefits: _formData['featureBenefits'],
-        closingCommitment: _formData['closingCommitment'],
-        mrFeedbackComments: _mrFeedbackCommentsController.text.trim().isNotEmpty ? _mrFeedbackCommentsController.text.trim() : null,
+        // DM Feedback - only for DM reports
+        teamwork: isDMReport ? _formData['teamwork'] : null,
+        customerAwareness: isDMReport ? _formData['customerAwareness'] : null,
+        medicalProductKnowledgeDM: isDMReport ? _formData['medicalProductKnowledgeDM'] : null,
+        dmFeedbackComments: isDMReport && _dmFeedbackCommentsController.text.trim().isNotEmpty ? _dmFeedbackCommentsController.text.trim() : null,
+        // MR Feedback - only for MR reports
+        punctuality: isDMReport ? null : _formData['punctuality'],
+        dressCode: isDMReport ? null : _formData['dressCode'],
+        pharmacyFeedback: isDMReport ? null : _formData['pharmacyFeedback'],
+        reviewProfile: isDMReport ? null : _formData['reviewProfile'],
+        patientCentricApproach: isDMReport ? null : _formData['patientCentricApproach'],
+        medicalProductKnowledgeMR: isDMReport ? null : _formData['medicalProductKnowledgeMR'],
+        engaging: isDMReport ? null : _formData['engaging'],
+        featureBenefits: isDMReport ? null : _formData['featureBenefits'],
+        closingCommitment: isDMReport ? null : _formData['closingCommitment'],
+        mrFeedbackComments: isDMReport ? null : (_mrFeedbackCommentsController.text.trim().isNotEmpty ? _mrFeedbackCommentsController.text.trim() : null),
         isQuickSession: widget.isQuickSession,
       );
     }
@@ -553,6 +566,7 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
       final mrReport = createReport(
         mrId: _formData['mrId'] ?? widget.mrId ?? '',
         mrName: selectedMRName,
+        isDMReport: false, // This is MR report
       );
       
       try {
@@ -585,18 +599,21 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
       // Triple: Both DM and MR Feedback - create two reports
       debugPrint('📝 Triple Visit - creating two reports: one for DM and one for MR');
       
-      // Report 1: For Medical Representative (MR)
+      // Report 1: For Medical Representative (MR) - only MR feedback fields
       final mrReport = createReport(
         mrId: _formData['mrId'] ?? widget.mrId ?? '',
         mrName: selectedMRName,
+        isDMReport: false, // This is MR report
       );
       
-      // Report 2: For District Manager (DM) - use selected DM as the "MR" in this report
+      // Report 2: For District Manager (DM) - only DM feedback fields
+      // Use selected DM as the "MR" in this report (because DM is being coached)
       final dmReport = createReport(
         mrId: _formData['dmId'] ?? widget.dmId ?? '', // Use DM ID as "MR" ID for DM report
         mrName: selectedDMName, // Use DM name as "MR" name
         dmId: widget.coachId, // Coach ID
         dmName: widget.coachName, // Coach name
+        isDMReport: true, // This is DM report
       );
       
       // Submit both reports sequentially
@@ -634,6 +651,7 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
       final report = createReport(
         mrId: _formData['mrId'] ?? widget.mrId ?? '',
         mrName: selectedMRName,
+        isDMReport: false, // This is MR report
       );
       
       try {

@@ -41,6 +41,9 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
   Map<String, String?> _mrProfilePictures = {}; // Map of MR ID -> profile_picture_url
   Map<String, String?> _mrNamesToIds = {}; // Map of MR name -> MR ID for lookup
   Map<String, String?> _dmRoles = {}; // Map of DM ID -> role
+  Set<String> _mrIds = {}; // Set of MR IDs from users table
+  Set<String> _dmIds = {}; // Set of DM IDs from users table
+  Map<String, String> _personRoles = {}; // Map of person ID -> role from Supabase (mr, dm, ft, etc.)
   
   // Loading and error states
   bool _isLoadingProfiles = true;
@@ -51,6 +54,10 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
   @override
   void initState() {
     super.initState();
+    debugPrint('📊 PM/MSL Dashboard initialized');
+    debugPrint('   Initial reports count: ${widget.reports.length}');
+    debugPrint('   coachId: ${widget.coachId}');
+    debugPrint('   coachRole: ${widget.coachRole}');
     _currentReports = List.from(widget.reports);
     _initializeData();
     _startRealtimeUpdates();
@@ -83,30 +90,64 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
     }
 
     try {
-      debugPrint('🖼️ Loading MR profile pictures... (attempt ${_profileRetryCount + 1})');
+      debugPrint('🖼️ Loading MR and DM profile pictures... (attempt ${_profileRetryCount + 1})');
+      // Load both MRs and DMs to support Triple Visit reports
       final mrs = await SupabaseService.getAllMRs();
+      final dms = await SupabaseService.getAllDMs();
       
       final profileMap = <String, String?>{};
       final nameToIdMap = <String, String?>{};
+      final personRolesMap = <String, String>{};
       
+      final mrIdsSet = <String>{};
+      final dmIdsSet = <String>{};
+      
+      // Load MR profiles and roles
       for (final mr in mrs) {
         final id = (mr['id'] ?? '').toString();
         final name = (mr['name'] ?? '').toString();
         final profileUrl = mr['profile_picture_url']?.toString();
+        final role = (mr['role'] ?? 'mr').toString().toLowerCase();
         
         if (id.isNotEmpty) {
           profileMap[id] = profileUrl;
+          mrIdsSet.add(id);
+          personRolesMap[id] = role;
         }
         if (name.isNotEmpty && id.isNotEmpty) {
           nameToIdMap[name] = id;
         }
       }
       
-      debugPrint('   ✅ Loaded ${profileMap.length} MR profiles');
+      // Load DM profiles and roles (for Triple Visit DM reports)
+      for (final dm in dms) {
+        final id = (dm['id'] ?? '').toString();
+        final name = (dm['name'] ?? '').toString();
+        final profileUrl = dm['profile_picture_url']?.toString();
+        final role = (dm['role'] ?? 'dm').toString().toLowerCase();
+        
+        if (id.isNotEmpty) {
+          if (!profileMap.containsKey(id)) {
+            profileMap[id] = profileUrl;
+          }
+          dmIdsSet.add(id);
+          personRolesMap[id] = role;
+        }
+        if (name.isNotEmpty && id.isNotEmpty && !nameToIdMap.containsKey(name)) {
+          nameToIdMap[name] = id;
+        }
+      }
+      
+      debugPrint('   ✅ Loaded ${profileMap.length} profiles (MRs + DMs)');
+      debugPrint('   📋 MR IDs: ${mrIdsSet.length}, DM IDs: ${dmIdsSet.length}');
+      debugPrint('   📋 Person Roles: ${personRolesMap.length}');
       if (mounted) {
         setState(() {
           _mrProfilePictures = profileMap;
           _mrNamesToIds = nameToIdMap;
+          _mrIds = mrIdsSet;
+          _dmIds = dmIdsSet;
+          _personRoles = personRolesMap;
           _isLoadingProfiles = false;
           _profileRetryCount = 0; // Reset on success
         });
@@ -191,6 +232,8 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
       if (mounted) {
         setState(() {
           _dmRoles = roleMap;
+          // Also update _personRoles to include DM/FT roles
+          _personRoles.addAll(roleMap.map((key, value) => MapEntry(key, value ?? 'dm')));
           _rolesRetryCount = 0; // Reset on success
         });
       }
@@ -244,9 +287,25 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
         return 'Product Manager';
       case 'msl':
         return 'Medical Science Liaison';
+      case 'mr':
+        return 'Medical Rep';
       default:
         return 'Coach';
     }
+  }
+
+  /// Determine if a report is a DM report or MR report based on mr_id in users table
+  bool _isDMReport(CoachingReport report) {
+    // First, check if mr_id is in DM IDs set (most reliable)
+    if (_dmIds.contains(report.mrId)) {
+      return true;
+    }
+    // If not in DM IDs, check if it's in MR IDs
+    if (_mrIds.contains(report.mrId)) {
+      return false;
+    }
+    // Fallback: use field-based detection (for old reports or if IDs not loaded yet)
+    return report.customerAwareness != null || report.medicalProductKnowledgeDM != null;
   }
 
   String? _getMRProfilePictureUrl(String mrId, String? mrName) {
@@ -280,10 +339,7 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
     }).toList();
 
     // Filter only MR reports (exclude DM reports from Triple Visit)
-    final mrReports = thisMonthReports.where((r) {
-      // MR report: no DM feedback fields
-      return r.customerAwareness == null && r.medicalProductKnowledgeDM == null;
-    }).toList();
+    final mrReports = thisMonthReports.where((r) => !_isDMReport(r)).toList();
 
     // Calculate average score only from MR reports
     final allScores = mrReports
@@ -298,28 +354,14 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
     final uniqueMRs = mrReports.map((r) => r.mrId).where((id) => id.isNotEmpty).toSet().length;
     
     // Count unique DMs from DM reports (Triple Visit)
-    final dmReports = thisMonthReports.where((r) {
-      // DM report: has DM feedback fields
-      return r.customerAwareness != null || r.medicalProductKnowledgeDM != null;
-    }).toList();
+    final dmReports = thisMonthReports.where((r) => _isDMReport(r)).toList();
     final uniqueDMs = dmReports.map((r) => r.mrId).where((id) => id.isNotEmpty).toSet().length;
 
-    // Calculate total visits: For Triple Visit, count as 1 visit (not 2)
-    // Group reports by date and typeOfVisit to handle Triple visits correctly
-    final visitDates = <String>{};
-    for (final report in thisMonthReports) {
-      if (report.typeOfVisit == 'Triple') {
-        // For Triple Visit, count the date only once
-        visitDates.add(report.date);
-      } else {
-        // For Single/Double, count each report as a separate visit
-        visitDates.add('${report.date}_${report.mrId}');
-      }
-    }
-    final totalVisits = visitDates.length;
+    // Calculate total coaching sessions: Sum of unique MRs and unique DMs
+    final totalVisits = uniqueMRs + uniqueDMs;
 
     return {
-      'totalVisitsThisMonth': totalVisits, // Fixed: counts Triple Visit as 1 visit
+      'totalVisitsThisMonth': totalVisits, // Sum of MRs Coached + DMs Coached
       'averageScore': avgScore,
       'totalMRsCoached': uniqueMRs,
       'totalDMsCoached': uniqueDMs,
@@ -362,9 +404,7 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
 
     for (final report in reports) {
       // Only process MR reports (exclude DM reports from Triple Visit)
-      // MR report: no DM feedback fields
-      if (report.mrId.isNotEmpty && report.mrName.isNotEmpty && 
-          report.customerAwareness == null && report.medicalProductKnowledgeDM == null) {
+      if (report.mrId.isNotEmpty && report.mrName.isNotEmpty && !_isDMReport(report)) {
         final key = 'mr_${report.mrId}';
         if (!performanceStats.containsKey(key)) {
           performanceStats[key] = {
@@ -425,9 +465,7 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
     
     for (final report in thisMonthReports) {
       // Only process MR reports (exclude DM reports from Triple Visit)
-      // MR report: no DM feedback fields
-      if (report.mrId.isNotEmpty && report.mrName.isNotEmpty && 
-          report.customerAwareness == null && report.medicalProductKnowledgeDM == null) {
+      if (report.mrId.isNotEmpty && report.mrName.isNotEmpty && !_isDMReport(report)) {
         final key = 'mr_${report.mrId}';
         if (!personReports.containsKey(key)) {
           personReports[key] = {
@@ -478,9 +516,16 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
 
 
   void _startRealtimeUpdates() {
+    debugPrint('🔄 Starting real-time updates for PM/MSL Dashboard...');
+    debugPrint('   coachId: ${widget.coachId}');
+    debugPrint('   coachRole: ${widget.coachRole}');
+    debugPrint('   Supabase initialized: ${SupabaseService.isInitialized}');
+    
     if (widget.coachId != null && SupabaseService.isInitialized) {
+      debugPrint('   ✅ Setting up real-time subscription...');
       _reportsSubscription = SupabaseService.watchReports(widget.coachId!, coachRole: widget.coachRole).listen(
         (reports) {
+          debugPrint('   📊 Real-time update: Received ${reports.length} reports');
           if (mounted) {
             setState(() {
               _currentReports = reports;
@@ -491,13 +536,38 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
           }
         },
         onError: (error) {
+          debugPrint('   ❌ Real-time subscription error: $error');
           if (mounted) {
             setState(() {
               _currentReports = List.from(widget.reports);
             });
           }
+          // Try to fetch reports directly as fallback
+          _fetchReportsDirectly();
         },
       );
+    } else {
+      debugPrint('   ⚠️ Cannot start real-time updates: coachId=${widget.coachId}, Supabase initialized=${SupabaseService.isInitialized}');
+      // Try to fetch reports directly as fallback
+      _fetchReportsDirectly();
+    }
+  }
+
+  /// Fallback method to fetch reports directly from Supabase
+  Future<void> _fetchReportsDirectly() async {
+    if (widget.coachId != null && SupabaseService.isInitialized) {
+      try {
+        debugPrint('   🔄 Fetching reports directly from Supabase...');
+        final reports = await SupabaseService.getReports(widget.coachId!, coachRole: widget.coachRole);
+        debugPrint('   ✅ Fetched ${reports.length} reports directly');
+        if (mounted) {
+          setState(() {
+            _currentReports = reports;
+          });
+        }
+      } catch (e) {
+        debugPrint('   ❌ Error fetching reports directly: $e');
+      }
     }
   }
 
@@ -510,6 +580,16 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final reports = _currentReports.isNotEmpty ? _currentReports : widget.reports;
+    debugPrint('📊 Dashboard build: Using ${reports.length} reports (current: ${_currentReports.length}, widget: ${widget.reports.length})');
+    
+    // Debug: Log all reports to verify Triple Visit reports are included
+    final tripleVisitReports = reports.where((r) => r.typeOfVisit == 'Triple').toList();
+    debugPrint('   🔍 Triple Visit reports: ${tripleVisitReports.length}');
+    for (var report in tripleVisitReports) {
+      final isDMReport = _isDMReport(report);
+      debugPrint('      - ${isDMReport ? "DM" : "MR"} Report: mr_id=${report.mrId}, mr_name=${report.mrName}, date=${report.date}');
+    }
+    
     final stats = _calculateStatsFromReports(reports);
     final monthlyVisits = _calculateMonthlyVisitsFromReports(reports);
     final mrPerformance = _calculateMRPerformanceFromReports(reports);
@@ -694,7 +774,7 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 const Text(
-                                  'DM - MR Performance Overview',
+                                  'Medical Rep Performance',
                                   style: TextStyle(
                                     color: AppColors.primaryBlue,
                                     fontSize: 18,
@@ -1410,8 +1490,8 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
   }
 
   double _calculateAvgScore(CoachingReport report) {
-    // For DM reports (has DM feedback fields), use DM score calculation
-    if (report.customerAwareness != null || report.medicalProductKnowledgeDM != null) {
+    // For DM reports, use DM score calculation
+    if (_isDMReport(report)) {
       return _calculateDMScore(report);
     }
     // For MR reports, use standard getAverageScore
@@ -1420,15 +1500,11 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
 
 
   Widget _buildRecentReportsList(List<CoachingReport> reports) {
-    // Only show MR reports (exclude DM reports from Triple Visit)
-    final mrReports = reports.where((r) {
-      // MR report: no DM feedback fields
-      return r.customerAwareness == null && r.medicalProductKnowledgeDM == null;
-    }).toList();
-    
-    // Sort by date (newest first) and take first 5
-    mrReports.sort((a, b) => b.date.compareTo(a.date));
-    final recentReports = mrReports.take(5).toList();
+    // Show both MR and DM reports from Triple Visit
+    // Sort by date (newest first) and take first 10 (to show both MR and DM from Triple Visits)
+    final sortedReports = List<CoachingReport>.from(reports)
+      ..sort((a, b) => b.date.compareTo(a.date));
+    final recentReports = sortedReports.take(10).toList();
     
     if (recentReports.isEmpty) {
       return const Center(
@@ -1445,11 +1521,18 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: recentReports.map((report) {
-        // For MR reports, use mrId and mrName directly
+        // Determine if this is a DM report or MR report based on mr_id in users table
+        final isDMReport = _isDMReport(report);
         final personName = report.mrName;
         final personId = report.mrId;
-        final personRole = 'MR'; // Always MR for MR reports
-        final avgScore = report.getAverageScore();
+        
+        // Get role from Supabase (most reliable)
+        final personRoleFromSupabase = _personRoles[personId] ?? (isDMReport ? 'dm' : 'mr');
+        final personRole = personRoleFromSupabase.toUpperCase(); // 'dm' -> 'DM', 'mr' -> 'MR'
+        
+        debugPrint('   📋 Recent Report: name=$personName, id=$personId, roleFromSupabase=$personRoleFromSupabase, isDMReport=$isDMReport');
+        
+        final avgScore = isDMReport ? report.getDMScore() : report.getAverageScore();
         final profileUrl = _getMRProfilePictureUrl(personId, personName);
         final initials = personName.split(' ')
             .take(2)
@@ -1566,7 +1649,7 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                _getRoleLabel(personRole == 'DM' ? 'dm' : (personRole == 'FT' ? 'ft' : 'mr')),
+                                _getRoleLabel(personRoleFromSupabase),
                                 style: const TextStyle(
                                   color: AppColors.gray600,
                                   fontSize: 12,
@@ -1821,13 +1904,21 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
   }
 
   Widget _buildReportModal(BuildContext context, CoachingReport report) {
+    // Determine if this is a DM report or MR report based on mr_id in users table
+    final isDMReport = _isDMReport(report);
+    final personName = report.mrName;
+    final personId = report.mrId;
+    
+    // Get role from Supabase (most reliable)
+    final personRoleFromSupabase = _personRoles[personId] ?? (isDMReport ? 'dm' : 'mr');
+    
     final avgScore = _calculateAvgScore(report);
     final scorePercent = (avgScore / 6.0 * 100).clamp(0, 100);
     final scoreColor = avgScore >= 5.0 ? AppColors.success 
         : avgScore >= 4.0 ? AppColors.warning 
         : AppColors.error;
     // Get initials from name
-    final initials = report.mrName.split(' ')
+    final initials = personName.split(' ')
         .take(2)
         .map((e) => e.isNotEmpty ? e[0].toUpperCase() : '')
         .join();
@@ -1878,7 +1969,7 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                             // Avatar - Show profile picture if available
                             Builder(
                               builder: (context) {
-                                final profileUrl = _getMRProfilePictureUrl(report.mrId, report.mrName);
+                                final profileUrl = _getMRProfilePictureUrl(report.mrId, personName);
                                 
                                 return Container(
                                   width: 56,
@@ -1962,7 +2053,7 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                   ),
                                   const SizedBox(height: 2),
                                   Text(
-                                    report.mrName,
+                                    personName,
                                     style: const TextStyle(
                                       color: Colors.white,
                                       fontSize: 18,
@@ -1970,6 +2061,14 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                     ),
                                     overflow: TextOverflow.ellipsis,
                                     maxLines: 1,
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    _getRoleLabel(personRoleFromSupabase),
+                                    style: TextStyle(
+                                      color: Colors.white.withOpacity(0.8),
+                                      fontSize: 12,
+                                    ),
                                   ),
                                   const SizedBox(height: 2),
                                   Text(
@@ -2051,12 +2150,15 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                             [
                               _buildModalInfoItem('Date', report.date),
                               _buildModalInfoItem('Average Score', '${avgScore.toStringAsFixed(2)} / 6.0'),
-                              if (report.dmName.isNotEmpty)
+                              if (report.dmName.isNotEmpty && !isDMReport)
                                 _buildModalInfoItem(
                                   _getRoleLabel(_dmRoles[report.dmId]),
                                   report.dmName,
                                 ),
-                              _buildModalInfoItem('Medical Rep', report.mrName),
+                              _buildModalInfoItem(
+                                _getRoleLabel(personRoleFromSupabase),
+                                personName,
+                              ),
                               if (report.brickName != null && report.brickName!.isNotEmpty)
                                 _buildModalInfoItem('Brick Name', report.brickName!),
                               if (report.locationName != null && report.locationName!.isNotEmpty)
@@ -2064,7 +2166,7 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                             ],
                           ),
                           const SizedBox(height: 24),
-                          // PM/MSL Specific Fields or DM/FT Fields
+                          // PM/MSL Specific Fields
                           if (isPMMSLReport) ...[
                             // Visit Details
                             if (report.visitedAccountsNames != null && report.visitedAccountsNames!.isNotEmpty)
@@ -2077,11 +2179,38 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                 ],
                               ),
                             const SizedBox(height: 24),
-                            // DM Feedback
-                            if (report.dmFeedbackComments != null || report.customerAwareness != null || report.medicalProductKnowledgeDM != null)
+                            // General Feedback (shown for both DM and MR reports)
+                            if (report.generalFeedback != null && report.generalFeedback!.isNotEmpty)
+                              _buildModalSection(
+                                'General Feedback',
+                                [
+                                  Container(
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.primaryCyan.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: AppColors.primaryCyan.withOpacity(0.3),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      report.generalFeedback!,
+                                      style: const TextStyle(
+                                        color: AppColors.gray900,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            const SizedBox(height: 24),
+                            // DM Feedback (only for DM reports)
+                            if (isDMReport && (report.dmFeedbackComments != null || report.customerAwareness != null || report.medicalProductKnowledgeDM != null || report.teamwork != null))
                               _buildModalSection(
                                 'DM Feedback',
                                 [
+                                  if (report.teamwork != null)
+                                    _buildModalInfoItem('Teamwork and Cooperation', report.teamwork!),
                                   if (report.customerAwareness != null)
                                     _buildModalInfoItem('Customer Awareness', report.customerAwareness!),
                                   if (report.medicalProductKnowledgeDM != null)
@@ -2118,12 +2247,11 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                     ),
                                 ],
                               ),
-                            const SizedBox(height: 24),
-                            // MR Feedback
-                            if (report.punctuality != null || report.dressCode != null || report.pharmacyFeedback != null || 
+                            // MR Feedback (only for MR reports)
+                            if (!isDMReport && (report.punctuality != null || report.dressCode != null || report.pharmacyFeedback != null || 
                                 report.patientCentricApproach != null || report.medicalProductKnowledgeMR != null ||
                                 report.featureBenefits != null || report.closingCommitment != null ||
-                                report.engaging != null || report.mrFeedbackComments != null)
+                                report.engaging != null || report.mrFeedbackComments != null))
                               _buildModalSection(
                                 'MR Feedback',
                                 [
@@ -2133,6 +2261,8 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                     _buildModalYesNoItem('Dress Code', report.dressCode),
                                   if (report.pharmacyFeedback != null)
                                     _buildModalScoreItem('Pharmacy Feedback', report.pharmacyFeedback),
+                                  if (report.reviewProfile != null)
+                                    _buildModalScoreItem('Review Profile', report.reviewProfile),
                                   if (report.patientCentricApproach != null)
                                     _buildModalScoreItem('Patient Centric Approach', report.patientCentricApproach),
                                   if (report.medicalProductKnowledgeMR != null)
@@ -2173,31 +2303,6 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                         ],
                                       ),
                                     ),
-                                ],
-                              ),
-                            const SizedBox(height: 24),
-                            // General Feedback
-                            if (report.generalFeedback != null && report.generalFeedback!.isNotEmpty)
-                              _buildModalSection(
-                                'General Feedback',
-                                [
-                                  Container(
-                                    padding: const EdgeInsets.all(16),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.primaryCyan.withOpacity(0.1),
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                        color: AppColors.primaryCyan.withOpacity(0.3),
-                                      ),
-                                    ),
-                                    child: Text(
-                                      report.generalFeedback!,
-                                      style: const TextStyle(
-                                        color: AppColors.gray900,
-                                        fontSize: 14,
-                                      ),
-                                    ),
-                                  ),
                                 ],
                               ),
                           ] else ...[

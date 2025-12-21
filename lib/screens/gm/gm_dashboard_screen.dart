@@ -126,11 +126,11 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
   List<Map<String, dynamic>> _calculateDMPerformance() {
     final coachStats = <String, Map<String, dynamic>>{};
 
-    // Filter: Only include reports with MRs (mrId is not empty)
-    // This excludes reports where PM/MSL coached a DM (typeOfVisit = 'DM')
-    final mrReports = allReports.where((r) => r.mrId.isNotEmpty).toList();
+    // For PM/MSL: include both MR and DM reports
+    // For DM/FT: include only MR reports
+    final allCoachReports = allReports.where((r) => r.mrId.isNotEmpty).toList();
 
-    for (final report in mrReports) {
+    for (final report in allCoachReports) {
       // Use coach name based on coachRole, fallback to dmName
       final coachName = report.coachRole != null && report.coachRole!.isNotEmpty
           ? '${report.dmName} (${report.coachRole!.toUpperCase()})'
@@ -138,18 +138,34 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
       
       if (coachName.isEmpty) continue;
       
+      final coachRole = report.coachRole ?? 'dm';
+      final isPMMSL = coachRole == 'pm' || coachRole == 'msl';
+      
       if (!coachStats.containsKey(coachName)) {
         coachStats[coachName] = {
           'visits': 0,
           'scores': <double>[],
           'mrIds': <String>{},
-          'role': report.coachRole ?? 'dm',
+          'dmIds': <String>{}, // Add DM IDs for PM/MSL
+          'role': coachRole,
         };
       }
 
       coachStats[coachName]!['visits'] = (coachStats[coachName]!['visits'] as int) + 1;
-      // mrId is guaranteed to be non-empty here due to filter above
-      (coachStats[coachName]!['mrIds'] as Set<String>).add(report.mrId);
+      
+      // For PM/MSL: check if this is a DM report or MR report
+      if (isPMMSL) {
+        // Check if mrId is a DM (has DM feedback fields)
+        final isDMReport = report.customerAwareness != null || report.medicalProductKnowledgeDM != null;
+        if (isDMReport) {
+          (coachStats[coachName]!['dmIds'] as Set<String>).add(report.mrId);
+        } else {
+          (coachStats[coachName]!['mrIds'] as Set<String>).add(report.mrId);
+        }
+      } else {
+        // For DM/FT: always MR
+        (coachStats[coachName]!['mrIds'] as Set<String>).add(report.mrId);
+      }
 
       final avgScore = _calculateAvgScore(report);
       if (avgScore > 0) {
@@ -191,13 +207,21 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
         shortName = cleanName;
       }
       
+      final role = entry.value['role'] as String;
+      final isPMMSL = role == 'pm' || role == 'msl';
+      final mrCount = (entry.value['mrIds'] as Set<String>).length;
+      final dmCount = isPMMSL ? (entry.value['dmIds'] as Set<String>).length : 0;
+      final totalCount = isPMMSL ? mrCount + dmCount : mrCount;
+      
       return {
         'name': shortName,
         'fullName': cleanName, // Name without role suffix
         'visits': entry.value['visits'],
         'avgScore': double.parse(avgScore.toStringAsFixed(2)),
-        'mrCount': (entry.value['mrIds'] as Set<String>).length,
-        'role': entry.value['role'],
+        'mrCount': mrCount,
+        'dmCount': dmCount,
+        'totalCount': totalCount, // For PM/MSL: MRs + DMs
+        'role': role,
       };
     }).whereType<Map<String, dynamic>>().toList();
   }
@@ -896,11 +920,25 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
                                           child: Row(
                                             children: [
                                               Expanded(
-                                                child: _buildDMStatItem('Visits', '${dm['visits']}', AppColors.primaryBlue),
+                                                child: _buildDMStatItem(
+                                                  dm['role'] == 'pm' || dm['role'] == 'msl' || dm['role'] == 'ft' || dm['role'] == 'dm'
+                                                      ? 'Coaching Visits'
+                                                      : 'Visits',
+                                                  '${dm['visits']}',
+                                                  AppColors.primaryBlue,
+                                                ),
                                               ),
                                               Container(width: 1, height: 32, color: AppColors.gray200),
                                               Expanded(
-                                                child: _buildDMStatItem('MRs', '${dm['mrCount']}', Colors.purple),
+                                                child: _buildDMStatItem(
+                                                  dm['role'] == 'pm' || dm['role'] == 'msl'
+                                                      ? 'MRs - DM'
+                                                      : 'MRs',
+                                                  dm['role'] == 'pm' || dm['role'] == 'msl'
+                                                      ? '${dm['totalCount']}'
+                                                      : '${dm['mrCount']}',
+                                                  Colors.purple,
+                                                ),
                                               ),
                                               Container(width: 1, height: 32, color: AppColors.gray200),
                                               Expanded(

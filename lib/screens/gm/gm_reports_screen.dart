@@ -35,6 +35,8 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
   Map<String, String> _mrRoles = {}; // Map of MR ID to role
   Map<String, String?> _mrProfilePictures = {}; // Map of MR ID -> profile_picture_url
   Map<String, String?> _mrNamesToIds = {}; // Map of MR name -> MR ID for lookup
+  Set<String> _mrIds = {}; // Set of MR IDs from users table
+  Set<String> _dmIds = {}; // Set of DM IDs from users table
 
   @override
   void initState() {
@@ -45,12 +47,17 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
 
   Future<void> _loadMRProfiles() async {
     try {
-      debugPrint('🖼️ Loading MR profile pictures...');
+      debugPrint('🖼️ Loading MR and DM profile pictures...');
+      // Load both MRs and DMs to support PM/MSL reports (Triple Visit)
       final mrs = await SupabaseService.getAllMRs();
+      final dms = await SupabaseService.getAllDMs();
       
       final profileMap = <String, String?>{};
       final nameToIdMap = <String, String?>{};
+      final mrIdsSet = <String>{};
+      final dmIdsSet = <String>{};
       
+      // Load MR profiles
       for (final mr in mrs) {
         final id = (mr['id'] ?? '').toString();
         final name = (mr['name'] ?? '').toString();
@@ -58,17 +65,38 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
         
         if (id.isNotEmpty) {
           profileMap[id] = profileUrl;
+          mrIdsSet.add(id);
         }
         if (name.isNotEmpty && id.isNotEmpty) {
           nameToIdMap[name] = id;
         }
       }
       
-      debugPrint('   ✅ Loaded ${profileMap.length} MR profiles');
+      // Load DM profiles (for PM/MSL Triple Visit reports)
+      for (final dm in dms) {
+        final id = (dm['id'] ?? '').toString();
+        final name = (dm['name'] ?? '').toString();
+        final profileUrl = dm['profile_picture_url']?.toString();
+        
+        if (id.isNotEmpty) {
+          if (!profileMap.containsKey(id)) {
+            profileMap[id] = profileUrl;
+          }
+          dmIdsSet.add(id);
+        }
+        if (name.isNotEmpty && id.isNotEmpty && !nameToIdMap.containsKey(name)) {
+          nameToIdMap[name] = id;
+        }
+      }
+      
+      debugPrint('   ✅ Loaded ${profileMap.length} profiles (MRs + DMs)');
+      debugPrint('   📋 MR IDs: ${mrIdsSet.length}, DM IDs: ${dmIdsSet.length}');
       if (mounted) {
         setState(() {
           _mrProfilePictures = profileMap;
           _mrNamesToIds = nameToIdMap;
+          _mrIds = mrIdsSet;
+          _dmIds = dmIdsSet;
         });
       }
     } catch (e) {
@@ -154,7 +182,34 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
     }).toList();
   }
 
+  /// Determine if a report is a DM report or MR report based on mr_id in users table
+  /// This is important for PM/MSL reports (Triple Visit) where we have separate reports for DM and MR
+  bool _isDMReport(CoachingReport report) {
+    // Only check for PM/MSL reports (coachRole is pm or msl)
+    if (report.coachRole != 'pm' && report.coachRole != 'msl') {
+      // For DM/FT reports, always MR reports (they coach MRs)
+      return false;
+    }
+    
+    // For PM/MSL reports, check if mr_id is in DM IDs set (most reliable)
+    if (_dmIds.contains(report.mrId)) {
+      return true;
+    }
+    // If not in DM IDs, check if it's in MR IDs
+    if (_mrIds.contains(report.mrId)) {
+      return false;
+    }
+    // Fallback: use field-based detection (for old reports or if IDs not loaded yet)
+    return report.customerAwareness != null || report.medicalProductKnowledgeDM != null;
+  }
+
   double _calculateAvgScore(CoachingReport report) {
+    // For PM/MSL reports, use getDMScore() for DM reports and getAverageScore() for MR reports
+    if (report.coachRole == 'pm' || report.coachRole == 'msl') {
+      final isDMReport = _isDMReport(report);
+      return isDMReport ? report.getDMScore() : report.getAverageScore();
+    }
+    // For DM/FT reports, always use getAverageScore() (they coach MRs)
     return report.getAverageScore();
   }
 
@@ -795,20 +850,21 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                                           ],
                                         ),
                                       ),
-                                      // Quick Stats
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                        decoration: BoxDecoration(
-                                          color: AppColors.gray50,
+                                      // Quick Stats - Only show for DM/FT reports
+                                      if (report.coachRole != 'pm' && report.coachRole != 'msl')
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                          decoration: BoxDecoration(
+                                            color: AppColors.gray50,
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              _buildQuickStat('Punctuality', report.punctuality ?? 'N/A', report.punctuality == 'Yes'),
+                                              _buildQuickStat('Dress Code', report.dressCode ?? 'N/A', report.dressCode == 'Yes'),
+                                              _buildQuickStat('With MR', report.filledWithMR ?? 'N/A', report.filledWithMR == 'Yes'),
+                                            ],
+                                          ),
                                         ),
-                                        child: Row(
-                                          children: [
-                                            _buildQuickStat('Punctuality', report.punctuality ?? 'N/A', report.punctuality == 'Yes'),
-                                            _buildQuickStat('Dress Code', report.dressCode ?? 'N/A', report.dressCode == 'Yes'),
-                                            _buildQuickStat('With MR', report.filledWithMR ?? 'N/A', report.filledWithMR == 'Yes'),
-                                          ],
-                                        ),
-                                      ),
                                       // Action Buttons
                                       Container(
                                         decoration: BoxDecoration(
@@ -1062,122 +1118,128 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                             _buildModalInfoItem('Session Type', 'Quick Session (No Plan)'),
                         ],
                       ),
-                      const SizedBox(height: 24),
-                      // Personal Attributes
-                      _buildModalSection(
-                        'Personal Attributes',
-                        [
-                          _buildModalYesNoItem('Punctuality', report.punctuality),
-                          _buildModalYesNoItem('Dress Code', report.dressCode),
-                          _buildModalYesNoItem('Time & Territory Management', report.timeManagement),
-                        ],
-                      ),
-                      const SizedBox(height: 24),
-                      // Performance Scores
-                      _buildModalSection(
-                        'Performance Scores',
-                        [
-                          _buildModalScoreItem('Pharmacy Feedback', report.pharmacyFeedback),
-                          _buildModalScoreItem('Review Customer Profile', report.reviewProfile),
-                          _buildModalScoreItem('Brand Bonding Ladder', report.brandBonding),
-                          _buildModalScoreItem('SMART Objectives', report.smartObjectives),
-                          _buildModalScoreItem('Opening / Rapport', report.opening),
-                          _buildModalScoreItem('Patient Profile', report.patientProfile),
-                          _buildModalScoreItem('Engaging Customer', report.engaging),
-                          _buildModalScoreItem('Insightful Questions', report.insightfulQuestions),
-                          _buildModalScoreItem('Active Listening', report.activeListening),
-                          _buildModalScoreItem('Link Features', report.linkFeatures),
-                          _buildModalScoreItem('Product Knowledge', report.productKnowledge),
-                          _buildModalScoreItem('E-detailing', report.eDetailing),
-                          _buildModalScoreItem('Answering Questions', report.answeringQuestions),
-                          _buildModalScoreItem('Summarize Call', report.summarizeCall),
-                          _buildModalScoreItem('Ask for Commitment', report.askCommitment),
-                          _buildModalScoreItem('Bridging', report.bridging),
-                          _buildModalScoreItem('Self-assessment', report.selfAssessment),
-                        ],
-                      ),
-                      const SizedBox(height: 24),
-                      // Feedback
-                      _buildModalSection(
-                        'Feedback',
-                        [
-                          Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: AppColors.success.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: AppColors.success.withOpacity(0.3),
+                      // Personal Attributes - Only for DM/FT reports
+                      if (report.coachRole != 'pm' && report.coachRole != 'msl') ...[
+                        const SizedBox(height: 24),
+                        _buildModalSection(
+                          'Personal Attributes',
+                          [
+                            _buildModalYesNoItem('Punctuality', report.punctuality),
+                            _buildModalYesNoItem('Dress Code', report.dressCode),
+                            _buildModalYesNoItem('Time & Territory Management', report.timeManagement),
+                          ],
+                        ),
+                      ],
+                      // Performance Scores - Only for DM/FT reports
+                      if (report.coachRole != 'pm' && report.coachRole != 'msl') ...[
+                        const SizedBox(height: 24),
+                        _buildModalSection(
+                          'Performance Scores',
+                          [
+                            _buildModalScoreItem('Pharmacy Feedback', report.pharmacyFeedback),
+                            _buildModalScoreItem('Review Customer Profile', report.reviewProfile),
+                            _buildModalScoreItem('Brand Bonding Ladder', report.brandBonding),
+                            _buildModalScoreItem('SMART Objectives', report.smartObjectives),
+                            _buildModalScoreItem('Opening / Rapport', report.opening),
+                            _buildModalScoreItem('Patient Profile', report.patientProfile),
+                            _buildModalScoreItem('Engaging Customer', report.engaging),
+                            _buildModalScoreItem('Insightful Questions', report.insightfulQuestions),
+                            _buildModalScoreItem('Active Listening', report.activeListening),
+                            _buildModalScoreItem('Link Features', report.linkFeatures),
+                            _buildModalScoreItem('Product Knowledge', report.productKnowledge),
+                            _buildModalScoreItem('E-detailing', report.eDetailing),
+                            _buildModalScoreItem('Answering Questions', report.answeringQuestions),
+                            _buildModalScoreItem('Summarize Call', report.summarizeCall),
+                            _buildModalScoreItem('Ask for Commitment', report.askCommitment),
+                            _buildModalScoreItem('Bridging', report.bridging),
+                            _buildModalScoreItem('Self-assessment', report.selfAssessment),
+                          ],
+                        ),
+                      ],
+                      // Feedback - Only for DM/FT reports
+                      if (report.coachRole != 'pm' && report.coachRole != 'msl') ...[
+                        const SizedBox(height: 24),
+                        _buildModalSection(
+                          'Feedback',
+                          [
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: AppColors.success.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: AppColors.success.withOpacity(0.3),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Row(
+                                    children: [
+                                      Icon(Icons.check_circle, color: AppColors.success, size: 16),
+                                      SizedBox(width: 8),
+                                      Text(
+                                        'Strengths',
+                                        style: TextStyle(
+                                          color: AppColors.gray700,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    report.strengths ?? 'No feedback provided',
+                                    style: const TextStyle(
+                                      color: AppColors.gray900,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Row(
-                                  children: [
-                                    Icon(Icons.check_circle, color: AppColors.success, size: 16),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      'Strengths',
-                                      style: TextStyle(
-                                        color: AppColors.gray700,
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w500,
+                            const SizedBox(height: 12),
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: AppColors.warning.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: AppColors.warning.withOpacity(0.3),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Row(
+                                    children: [
+                                      Icon(Icons.track_changes, color: AppColors.warning, size: 16),
+                                      SizedBox(width: 8),
+                                      Text(
+                                        'Areas of Improvement',
+                                        style: TextStyle(
+                                          color: AppColors.gray700,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w500,
+                                        ),
                                       ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  report.strengths ?? 'No feedback provided',
-                                  style: const TextStyle(
-                                    color: AppColors.gray900,
-                                    fontSize: 14,
+                                    ],
                                   ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: AppColors.warning.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: AppColors.warning.withOpacity(0.3),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    report.improvements ?? 'No feedback provided',
+                                    style: const TextStyle(
+                                      color: AppColors.gray900,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Row(
-                                  children: [
-                                    Icon(Icons.track_changes, color: AppColors.warning, size: 16),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      'Areas of Improvement',
-                                      style: TextStyle(
-                                        color: AppColors.gray700,
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  report.improvements ?? 'No feedback provided',
-                                  style: const TextStyle(
-                                    color: AppColors.gray900,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
+                          ],
+                        ),
+                      ],
                       const SizedBox(height: 24),
                       // Location Information
                       if (report.locationName != null || report.googleMapsUrl != null || report.brickName != null)
@@ -1280,116 +1342,142 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                                   ],
                                 ),
                               ),
-                            if (report.customerAwareness != null)
-                              _buildModalInfoItem('Customer Awareness', report.customerAwareness!),
-                            if (report.medicalProductKnowledgeDM != null)
-                              _buildModalInfoItem('DM Medical Product Knowledge', report.medicalProductKnowledgeDM!),
-                            if (report.dmFeedbackComments != null && report.dmFeedbackComments!.isNotEmpty)
-                              Container(
-                                padding: const EdgeInsets.all(12),
-                                margin: const EdgeInsets.only(bottom: 8),
-                                decoration: BoxDecoration(
-                                  color: AppColors.gray50,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      'DM Feedback Comments and Insights',
-                                      style: TextStyle(
-                                        color: AppColors.gray600,
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      report.dmFeedbackComments!,
-                                      style: const TextStyle(
-                                        color: AppColors.gray900,
-                                        fontSize: 14,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            if (report.patientCentricApproach != null)
-                              _buildModalScoreItem('Patient Centric Approach', report.patientCentricApproach),
-                            if (report.medicalProductKnowledgeMR != null)
-                              _buildModalScoreItem('MR Medical Product Knowledge', report.medicalProductKnowledgeMR),
-                            if (report.featureBenefits != null)
-                              _buildModalScoreItem('Feature Benefits', report.featureBenefits),
-                            if (report.closingCommitment != null)
-                              _buildModalScoreItem('Closing Commitment', report.closingCommitment),
-                            if (report.mrFeedbackComments != null && report.mrFeedbackComments!.isNotEmpty)
-                              Container(
-                                padding: const EdgeInsets.all(12),
-                                margin: const EdgeInsets.only(bottom: 8),
-                                decoration: BoxDecoration(
-                                  color: AppColors.gray50,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      'MR Feedback Comments and Insights',
-                                      style: TextStyle(
-                                        color: AppColors.gray600,
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      report.mrFeedbackComments!,
-                                      style: const TextStyle(
-                                        color: AppColors.gray900,
-                                        fontSize: 14,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
                           ],
                         ),
-                      ],
-                      const SizedBox(height: 24),
-                      // Additional Info
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: AppColors.primaryCyan.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: AppColors.primaryCyan.withOpacity(0.3),
-                          ),
-                        ),
-                        child: RichText(
-                          text: TextSpan(
-                            style: const TextStyle(
-                              color: AppColors.gray700,
-                              fontSize: 14,
-                            ),
-                            children: [
-                              const TextSpan(
-                                text: 'Filled with Medical Representative: ',
-                                style: TextStyle(fontWeight: FontWeight.bold),
-                              ),
-                              TextSpan(
-                                text: report.filledWithMR ?? 'N/A',
-                                style: TextStyle(
-                                  color: report.filledWithMR == 'Yes'
-                                      ? AppColors.success
-                                      : AppColors.error,
-                                  fontWeight: FontWeight.bold,
+                        // DM Feedback - Only for DM reports in Triple Visit
+                        if (_isDMReport(report)) ...[
+                          const SizedBox(height: 24),
+                          _buildModalSection(
+                            'DM Feedback',
+                            [
+                              if (report.teamwork != null)
+                                _buildModalInfoItem('Teamwork and Cooperation', report.teamwork!),
+                              if (report.customerAwareness != null)
+                                _buildModalInfoItem('Customer Awareness', report.customerAwareness!),
+                              if (report.medicalProductKnowledgeDM != null)
+                                _buildModalInfoItem('DM Medical Product Knowledge', report.medicalProductKnowledgeDM!),
+                              if (report.dmFeedbackComments != null && report.dmFeedbackComments!.isNotEmpty)
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.gray50,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'DM Feedback Comments and Insights',
+                                        style: TextStyle(
+                                          color: AppColors.gray600,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        report.dmFeedbackComments!,
+                                        style: const TextStyle(
+                                          color: AppColors.gray900,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
                             ],
                           ),
+                        ],
+                        // MR Feedback - Only for MR reports
+                        if (!_isDMReport(report)) ...[
+                          const SizedBox(height: 24),
+                          _buildModalSection(
+                            'MR Feedback',
+                            [
+                              if (report.punctuality != null)
+                                _buildModalYesNoItem('Punctuality', report.punctuality),
+                              if (report.dressCode != null)
+                                _buildModalYesNoItem('Dress Code', report.dressCode),
+                              if (report.patientCentricApproach != null)
+                                _buildModalScoreItem('Patient Centric Approach', report.patientCentricApproach),
+                              if (report.medicalProductKnowledgeMR != null)
+                                _buildModalScoreItem('MR Medical Product Knowledge', report.medicalProductKnowledgeMR),
+                              if (report.featureBenefits != null)
+                                _buildModalScoreItem('Feature Benefits', report.featureBenefits),
+                              if (report.closingCommitment != null)
+                                _buildModalScoreItem('Closing Commitment', report.closingCommitment),
+                              if (report.mrFeedbackComments != null && report.mrFeedbackComments!.isNotEmpty)
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.gray50,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'MR Feedback Comments and Insights',
+                                        style: TextStyle(
+                                          color: AppColors.gray600,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        report.mrFeedbackComments!,
+                                        style: const TextStyle(
+                                          color: AppColors.gray900,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ],
+                      ],
+                      // Additional Info - Only for DM/FT reports
+                      if (report.coachRole != 'pm' && report.coachRole != 'msl') ...[
+                        const SizedBox(height: 24),
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: AppColors.primaryCyan.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AppColors.primaryCyan.withOpacity(0.3),
+                            ),
+                          ),
+                          child: RichText(
+                            text: TextSpan(
+                              style: const TextStyle(
+                                color: AppColors.gray700,
+                                fontSize: 14,
+                              ),
+                              children: [
+                                const TextSpan(
+                                  text: 'Filled with Medical Representative: ',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                                TextSpan(
+                                  text: report.filledWithMR ?? 'N/A',
+                                  style: TextStyle(
+                                    color: report.filledWithMR == 'Yes'
+                                        ? AppColors.success
+                                        : AppColors.error,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
                 ),

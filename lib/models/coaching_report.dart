@@ -47,6 +47,7 @@ class CoachingReport {
   final String? typeOfVisit; // DM, Single, Double, Triple
   final String? visitedAccountsNames;
   final String? generalFeedback; // "General Feedback and Special Insights"
+  final String? teamwork; // Teamwork and Cooperation (High, Medium, Low)
   final String? customerAwareness; // High, Medium, Low
   final String? medicalProductKnowledgeDM; // High, Medium, Low
   final String? dmFeedbackComments; // "DM Feedback Comments and Insights"
@@ -100,6 +101,7 @@ class CoachingReport {
     this.typeOfVisit,
     this.visitedAccountsNames,
     this.generalFeedback,
+    this.teamwork,
     this.customerAwareness,
     this.medicalProductKnowledgeDM,
     this.dmFeedbackComments,
@@ -153,6 +155,7 @@ class CoachingReport {
       'typeOfVisit': typeOfVisit,
       'visitedAccountsNames': visitedAccountsNames,
       'generalFeedback': generalFeedback,
+      'teamwork': teamwork,
       'customerAwareness': customerAwareness,
       'medicalProductKnowledgeDM': medicalProductKnowledgeDM,
       'dmFeedbackComments': dmFeedbackComments,
@@ -207,6 +210,7 @@ class CoachingReport {
       typeOfVisit: json['typeOfVisit'],
       visitedAccountsNames: json['visitedAccountsNames'],
       generalFeedback: json['generalFeedback'],
+      teamwork: json['teamwork'],
       customerAwareness: json['customerAwareness'],
       medicalProductKnowledgeDM: json['medicalProductKnowledgeDM'],
       dmFeedbackComments: json['dmFeedbackComments'],
@@ -262,6 +266,7 @@ class CoachingReport {
       typeOfVisit: json['type_of_visit']?.toString(),
       visitedAccountsNames: json['visited_accounts_names']?.toString(),
       generalFeedback: json['general_feedback']?.toString(),
+      teamwork: json['teamwork_and_cooperation']?.toString(),
       customerAwareness: json['customer_awareness']?.toString(),
       medicalProductKnowledgeDM: json['medical_product_knowledge_dm']?.toString(),
       dmFeedbackComments: json['dm_feedback_comments']?.toString(),

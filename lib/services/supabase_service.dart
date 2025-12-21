@@ -105,6 +105,7 @@ class SupabaseService {
         'type_of_visit': report.typeOfVisit,
         'visited_accounts_names': report.visitedAccountsNames,
         'general_feedback': report.generalFeedback,
+        'teamwork_and_cooperation': report.teamwork,
         'customer_awareness': report.customerAwareness,
         'medical_product_knowledge_dm': report.medicalProductKnowledgeDM,
         'dm_feedback_comments': report.dmFeedbackComments,
@@ -182,9 +183,22 @@ class SupabaseService {
           debugPrint('         coach_role: ${report['coach_role']}');
           debugPrint('         date: ${report['date']}');
           debugPrint('         mr_id: ${report['mr_id']}');
+          debugPrint('         type_of_visit: ${report['type_of_visit']}');
         }
       } else {
         debugPrint('   ⚠️ No reports found with filters: coachRole=$coachRole, coachId=$coachId');
+        
+        // Try to find any reports with this coachId to debug
+        final allReportsQuery = client!.from('reports').select().eq('dm_id', coachId);
+        final allReports = await allReportsQuery;
+        debugPrint('   🔍 Debug: Found ${(allReports as List).length} total reports with dm_id=$coachId (without coach_role filter)');
+        if ((allReports as List).isNotEmpty) {
+          debugPrint('   📋 Sample reports with this dm_id:');
+          for (int i = 0; i < (allReports as List).length && i < 3; i++) {
+            final report = (allReports as List)[i];
+            debugPrint('      Report $i: coach_role=${report['coach_role']}, date=${report['date']}, mr_id=${report['mr_id']}');
+          }
+        }
         // Try to see what reports exist
         try {
           final allReports = await client!.from('reports').select('dm_id, coach_role, date').limit(10);
@@ -1083,7 +1097,9 @@ class SupabaseService {
 
   /// Listen to reports changes (real-time)
   static Stream<List<CoachingReport>> watchReports(String coachId, {String? coachRole}) {
+    debugPrint('🔄 watchReports called: coachId=$coachId, coachRole=$coachRole');
     if (!isInitialized) {
+      debugPrint('   ❌ Supabase not initialized, returning empty stream');
       return Stream.value([]);
     }
     
@@ -1092,6 +1108,8 @@ class SupabaseService {
         .from('reports')
         .stream(primaryKey: ['id'])
         .eq('dm_id', coachId);
+    
+    debugPrint('   🔍 Stream query: dm_id=$coachId');
     
     // Note: Supabase stream doesn't support chaining multiple eq() after stream()
     // So we filter by coach_role in the map function instead
@@ -1102,9 +1120,22 @@ class SupabaseService {
               .map((json) => CoachingReport.fromSupabaseJson(json))
               .toList();
           
+          debugPrint('   📊 Stream received ${reports.length} reports before coach_role filter');
+          
           // Filter by coach_role if provided
           if (coachRole != null) {
+            final beforeCount = reports.length;
             reports = reports.where((r) => r.coachRole == coachRole).toList();
+            debugPrint('   🔍 Filtered by coach_role=$coachRole: ${beforeCount} -> ${reports.length} reports');
+            
+            // Debug: Log coach_role values
+            if (beforeCount > 0 && reports.length == 0) {
+              debugPrint('   ⚠️ No reports match coach_role=$coachRole. Available coach_roles:');
+              final allReports = (data as List).map((json) => CoachingReport.fromSupabaseJson(json)).toList();
+              for (var r in allReports) {
+                debugPrint('      - Report: dm_id=${r.dmId}, coach_role=${r.coachRole}, mr_id=${r.mrId}, date=${r.date}');
+              }
+            }
           }
           
           return reports;
