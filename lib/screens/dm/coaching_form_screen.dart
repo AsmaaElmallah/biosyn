@@ -82,6 +82,21 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
     super.dispose();
   }
 
+  String _getRoleLabel(String? role) {
+    switch (role?.toLowerCase()) {
+      case 'dm':
+        return 'District Manager (DM)';
+      case 'ft':
+        return 'Field Trainer (FT)';
+      case 'pm':
+        return 'Product Manager (PM)';
+      case 'msl':
+        return 'Medical Science Liaison (MSL)';
+      default:
+        return 'Coach';
+    }
+  }
+
   Future<void> _getCurrentLocation() async {
     setState(() => _locationLoading = true);
     try {
@@ -785,58 +800,131 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
         ),
         const SizedBox(height: 24),
         _buildTextField(
-          label: 'District Manager (DM)',
-          value: '${widget.dmName} - ${widget.dmId}',
+          label: _getRoleLabel(widget.coachRole),
+          value: widget.dmName,
           enabled: false,
         ),
         const SizedBox(height: 24),
         _buildTextField(
           label: 'Medical Representative (MR)',
-          value: '${widget.mrName} - ${widget.mrId}',
+          value: widget.mrName,
           enabled: false,
         ),
         const SizedBox(height: 24),
         // Brick Name
-        TextField(
-          controller: _brickNameController,
-          onChanged: (value) => _updateField('brickName', value),
-          decoration: InputDecoration(
-            labelText: 'Brick Name',
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryBlue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Icon(
+                    Icons.business_outlined,
+                    size: 16,
+                    color: AppColors.primaryBlue,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  'Brick Name',
+                  style: TextStyle(
+                    color: AppColors.gray700,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+            const SizedBox(height: 12),
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.03),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: TextField(
+                controller: _brickNameController,
+                onChanged: (value) => _updateField('brickName', value),
+                maxLines: 1,
+                decoration: InputDecoration(
+                  prefixIcon: const Icon(
+                    Icons.business_outlined,
+                    color: AppColors.primaryBlue,
+                    size: 20,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: AppColors.primaryCyan, width: 2.5),
+                  ),
+                  filled: true,
+                  fillColor: Colors.white,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                ),
+              ),
             ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.primaryCyan, width: 2),
-            ),
-            filled: true,
-            fillColor: Colors.white,
-          ),
+          ],
         ),
         const SizedBox(height: 24),
         // Location Picker
         Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(color: AppColors.gray200, width: 2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.03),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                'Brick Location',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.gray700,
-                ),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryCyan.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Icon(
+                      Icons.location_on,
+                      size: 18,
+                      color: AppColors.primaryCyan,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Brick Location',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.gray700,
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 12),
               if (_currentPosition != null) ...[
@@ -911,26 +999,79 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
         ),
         const SizedBox(height: 24),
         // Doctors Visited
-        TextField(
-          controller: _doctorsVisitedController,
-          decoration: InputDecoration(
-            labelText: 'Doctors Visited (comma-separated)',
-            hintText: 'Dr. Ahmed, Dr. Mohamed, ...',
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryBlue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Icon(
+                    Icons.people_outline,
+                    size: 16,
+                    color: AppColors.primaryBlue,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    'Doctors Visited (comma-separated)',
+                    style: const TextStyle(
+                      color: AppColors.gray700,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 2,
+                  ),
+                ),
+              ],
             ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+            const SizedBox(height: 12),
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.03),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: TextField(
+                controller: _doctorsVisitedController,
+                maxLines: 1,
+                decoration: InputDecoration(
+                  prefixIcon: const Icon(
+                    Icons.people_outline,
+                    color: AppColors.primaryBlue,
+                    size: 20,
+                  ),
+                  hintText: 'Dr. Ahmed, Dr. Mohamed, ...',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: AppColors.primaryCyan, width: 2.5),
+                  ),
+                  filled: true,
+                  fillColor: Colors.white,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                ),
+              ),
             ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.primaryCyan, width: 2),
-            ),
-            filled: true,
-            fillColor: Colors.white,
-          ),
+          ],
         ),
         const SizedBox(height: 24),
         // Visit Count
@@ -1053,43 +1194,121 @@ class _CoachingFormScreenState extends State<CoachingFormScreen> {
     required String label,
     required String value,
     bool enabled = true,
+    IconData? icon,
   }) {
+    // Determine icon based on label if not provided
+    IconData? fieldIcon = icon;
+    if (fieldIcon == null) {
+      if (label.toLowerCase().contains('date')) {
+        fieldIcon = Icons.calendar_today;
+      } else if (label.toLowerCase().contains('district') || label.toLowerCase().contains('dm')) {
+        fieldIcon = Icons.person_outline;
+      } else if (label.toLowerCase().contains('medical') || label.toLowerCase().contains('mr')) {
+        fieldIcon = Icons.medical_services_outlined;
+      }
+    }
+    
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          '$label *',
-          style: const TextStyle(
-            color: AppColors.gray700,
-            fontSize: 16,
-            fontWeight: FontWeight.w500,
-          ),
+        Row(
+          children: [
+            if (fieldIcon != null) ...[
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: AppColors.primaryBlue.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Icon(
+                  fieldIcon,
+                  size: 16,
+                  color: AppColors.primaryBlue,
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
+            Flexible(
+              child: Text(
+                '$label *',
+                style: const TextStyle(
+                  color: AppColors.gray700,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 2,
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 12),
         Directionality(
           textDirection: TextDirection.ltr,
-          child: TextField(
-            enabled: enabled,
-            controller: TextEditingController(text: value),
-            textDirection: TextDirection.ltr,
-            textAlign: TextAlign.left,
-            keyboardType: TextInputType.text,
-            decoration: InputDecoration(
-              filled: true,
-              fillColor: enabled ? Colors.white : AppColors.gray50,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: enabled
+                  ? [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.03),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ]
+                  : null,
+            ),
+            child: TextField(
+              enabled: enabled,
+              controller: TextEditingController(text: value),
+              textDirection: TextDirection.ltr,
+              textAlign: TextAlign.left,
+              keyboardType: TextInputType.text,
+              maxLines: 1,
+              style: TextStyle(
+                color: enabled ? AppColors.gray900 : AppColors.gray600,
+                fontWeight: enabled ? FontWeight.w500 : FontWeight.w400,
               ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppColors.gray200, width: 2),
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: enabled ? Colors.white : AppColors.gray50,
+                prefixIcon: fieldIcon != null
+                    ? Icon(
+                        fieldIcon,
+                        color: enabled ? AppColors.primaryBlue : AppColors.gray400,
+                        size: 20,
+                      )
+                    : null,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: enabled ? AppColors.gray200 : AppColors.gray300,
+                    width: 2,
+                  ),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: enabled ? AppColors.gray200 : AppColors.gray300,
+                    width: 2,
+                  ),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(
+                    color: AppColors.primaryCyan,
+                    width: 2.5,
+                  ),
+                ),
+                disabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(
+                    color: AppColors.gray300,
+                    width: 1.5,
+                  ),
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
               ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppColors.primaryCyan, width: 2),
-              ),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
             ),
           ),
         ),

@@ -102,8 +102,8 @@ COACHING REPORT
 BASIC INFORMATION
 -----------------
 Date: ${report.date}
-District Manager: ${report.dmName} (ID: ${report.dmId})
-Medical Representative: ${report.mrName} (ID: ${report.mrId})
+Coach: ${report.dmName}${report.coachRole != null ? ' (${report.coachRole!.toUpperCase()})' : ''}
+Coached Person: ${report.mrName} (MR)
 Average Score: $avgScore / 6.0
 
 PERSONAL ATTRIBUTES

@@ -27,6 +27,7 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
   List<Map<String, dynamic>> _allDMs = [];
   bool _isLoading = true;
   String? _errorMessage;
+  Map<String, String?> _coachProfilePictures = {}; // Map of coach name -> profile_picture_url
   
   // Current month for filtering
   DateTime _selectedMonth = DateTime.now();
@@ -49,6 +50,54 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
   void initState() {
     super.initState();
     _loadData();
+    _loadCoachProfiles();
+  }
+
+  Future<void> _loadCoachProfiles() async {
+    try {
+      debugPrint('🖼️ Loading coach profile pictures in View Plans...');
+      final dms = await SupabaseService.getAllDMs();
+      final fts = await SupabaseService.getAllFTs();
+      final pms = await SupabaseService.getAllPMs();
+      final msls = await SupabaseService.getAllMSLs();
+      
+      final allCoaches = [
+        ...dms.map((c) => {'name': c['name']?.toString() ?? '', 'profile_picture_url': c['profile_picture_url']?.toString()}),
+        ...fts.map((c) => {'name': c['name']?.toString() ?? '', 'profile_picture_url': c['profile_picture_url']?.toString()}),
+        ...pms.map((c) => {'name': c['name']?.toString() ?? '', 'profile_picture_url': c['profile_picture_url']?.toString()}),
+        ...msls.map((c) => {'name': c['name']?.toString() ?? '', 'profile_picture_url': c['profile_picture_url']?.toString()}),
+      ];
+      
+      final profileMap = <String, String?>{};
+      for (final coach in allCoaches) {
+        final name = coach['name'] ?? '';
+        if (name.isNotEmpty) {
+          profileMap[name] = coach['profile_picture_url'];
+          if (coach['profile_picture_url'] != null && (coach['profile_picture_url'] as String).isNotEmpty) {
+            debugPrint('   ✅ Found profile picture for: $name');
+          }
+        }
+      }
+      
+      final picturesCount = profileMap.values.where((url) => url != null && url.isNotEmpty).length;
+      debugPrint('   ✅ Loaded ${profileMap.length} coach profiles ($picturesCount with pictures)');
+      if (mounted) {
+        setState(() {
+          _coachProfilePictures = profileMap;
+        });
+      }
+    } catch (e) {
+      debugPrint('   ❌ Error loading coach profiles: $e');
+    }
+  }
+
+  String? _getProfilePictureUrl(String coachName) {
+    // Extract clean name (remove role suffix if exists)
+    String cleanName = coachName;
+    if (cleanName.contains(' (')) {
+      cleanName = cleanName.substring(0, cleanName.indexOf(' ('));
+    }
+    return _coachProfilePictures[cleanName];
   }
 
   Future<void> _loadData() async {
@@ -492,24 +541,77 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
             ),
             child: Row(
               children: [
-                // Avatar
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: color,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Center(
-                    child: Text(
-                      dmName.split(' ').take(2).map((e) => e.isNotEmpty ? e[0].toUpperCase() : '').join(),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
+                // Avatar - Show profile picture if available
+                Builder(
+                  builder: (context) {
+                    final profileUrl = _getProfilePictureUrl(dmName);
+                    final initials = dmName.split(' ').take(2).map((e) => e.isNotEmpty ? e[0].toUpperCase() : '').join();
+                    
+                    return Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: profileUrl == null ? color : null,
+                        shape: BoxShape.circle,
+                        border: profileUrl != null ? Border.all(color: color, width: 2) : null,
                       ),
-                    ),
-                  ),
+                      child: profileUrl != null && profileUrl.isNotEmpty
+                          ? ClipOval(
+                              child: Image.network(
+                                profileUrl,
+                                width: 44,
+                                height: 44,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Container(
+                                    decoration: BoxDecoration(
+                                      color: color,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        initials,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                                loadingBuilder: (context, child, loadingProgress) {
+                                  if (loadingProgress == null) return child;
+                                  return Container(
+                                    decoration: BoxDecoration(
+                                      color: color,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Center(
+                                      child: CircularProgressIndicator(
+                                        value: loadingProgress.expectedTotalBytes != null
+                                            ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                                            : null,
+                                        strokeWidth: 2,
+                                        valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            )
+                          : Center(
+                              child: Text(
+                                initials,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                    );
+                  },
                 ),
                 const SizedBox(width: 12),
                 Expanded(

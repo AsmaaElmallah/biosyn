@@ -5,9 +5,11 @@ import 'package:biosyn_report_flutter/widgets/app_header.dart';
 import 'package:biosyn_report_flutter/widgets/connectivity_indicator.dart';
 import 'package:biosyn_report_flutter/widgets/sync_status_indicator.dart';
 import 'package:biosyn_report_flutter/models/coaching_report.dart';
+import 'package:biosyn_report_flutter/services/supabase_service.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/foundation.dart';
 
-class GMDashboardScreen extends StatelessWidget {
+class GMDashboardScreen extends StatefulWidget {
   final List<CoachingReport> allReports;
   final VoidCallback onExport;
   final String activeTab;
@@ -20,6 +22,62 @@ class GMDashboardScreen extends StatelessWidget {
     required this.activeTab,
     required this.onTabChange,
   });
+
+  @override
+  State<GMDashboardScreen> createState() => _GMDashboardScreenState();
+}
+
+class _GMDashboardScreenState extends State<GMDashboardScreen> {
+  Map<String, String?> _coachProfilePictures = {}; // Map of coach name -> profile_picture_url
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCoachProfiles();
+  }
+
+  Future<void> _loadCoachProfiles() async {
+    try {
+      debugPrint('🖼️ Loading coach profile pictures...');
+      final dms = await SupabaseService.getAllDMs();
+      final fts = await SupabaseService.getAllFTs();
+      final pms = await SupabaseService.getAllPMs();
+      final msls = await SupabaseService.getAllMSLs();
+      
+      final allCoaches = [
+        ...dms.map((c) => {'name': c['name']?.toString() ?? '', 'profile_picture_url': c['profile_picture_url']?.toString()}),
+        ...fts.map((c) => {'name': c['name']?.toString() ?? '', 'profile_picture_url': c['profile_picture_url']?.toString()}),
+        ...pms.map((c) => {'name': c['name']?.toString() ?? '', 'profile_picture_url': c['profile_picture_url']?.toString()}),
+        ...msls.map((c) => {'name': c['name']?.toString() ?? '', 'profile_picture_url': c['profile_picture_url']?.toString()}),
+      ];
+      
+      final profileMap = <String, String?>{};
+      for (final coach in allCoaches) {
+        final name = coach['name'] ?? '';
+        if (name.isNotEmpty) {
+          profileMap[name] = coach['profile_picture_url'];
+        }
+      }
+      
+      debugPrint('   ✅ Loaded ${profileMap.length} coach profiles');
+      if (mounted) {
+        setState(() {
+          _coachProfilePictures = profileMap;
+        });
+      }
+    } catch (e) {
+      debugPrint('   ❌ Error loading coach profiles: $e');
+    }
+  }
+
+  String _getProfilePictureUrl(String coachName) {
+    // Extract clean name (remove role suffix if exists)
+    String cleanName = coachName;
+    if (cleanName.contains(' (')) {
+      cleanName = cleanName.substring(0, cleanName.indexOf(' ('));
+    }
+    return _coachProfilePictures[cleanName] ?? '';
+  }
 
   String _getRoleLabel(String? role) {
     switch (role?.toLowerCase()) {
@@ -35,6 +93,11 @@ class GMDashboardScreen extends StatelessWidget {
         return 'Coach';
     }
   }
+
+  List<CoachingReport> get allReports => widget.allReports;
+  VoidCallback get onExport => widget.onExport;
+  String get activeTab => widget.activeTab;
+  Function(String) get onTabChange => widget.onTabChange;
 
   /// Check if coach has any quick sessions
   bool _hasQuickSessionsForCoach(String coachName) {
@@ -673,24 +736,78 @@ class GMDashboardScreen extends StatelessWidget {
                                           padding: const EdgeInsets.all(16),
                                           child: Row(
                                             children: [
-                                              // Avatar
-                                              Container(
-                                                width: 48,
-                                                height: 48,
-                                                decoration: BoxDecoration(
-                                                  gradient: AppColors.primaryGradient,
-                                                  shape: BoxShape.circle,
-                                                ),
-                                                child: Center(
-                                                  child: Text(
-                                                    ((dm['fullName'] ?? dm['name']) as String).split(' ').take(2).map((e) => e.isNotEmpty ? e[0].toUpperCase() : '').join(),
-                                                    style: const TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 16,
-                                                      fontWeight: FontWeight.bold,
+                                              // Avatar - Show profile picture if available
+                                              Builder(
+                                                builder: (context) {
+                                                  final coachName = (dm['fullName'] ?? dm['name']) as String;
+                                                  final profileUrl = _getProfilePictureUrl(coachName);
+                                                  final initials = coachName.split(' ').take(2).map((e) => e.isNotEmpty ? e[0].toUpperCase() : '').join();
+                                                  
+                                                  return Container(
+                                                    width: 48,
+                                                    height: 48,
+                                                    decoration: BoxDecoration(
+                                                      gradient: profileUrl.isEmpty ? AppColors.primaryGradient : null,
+                                                      shape: BoxShape.circle,
+                                                      border: profileUrl.isNotEmpty ? Border.all(color: AppColors.gray200, width: 2) : null,
                                                     ),
-                                                  ),
-                                                ),
+                                                    child: profileUrl.isNotEmpty
+                                                        ? ClipOval(
+                                                            child: Image.network(
+                                                              profileUrl,
+                                                              width: 48,
+                                                              height: 48,
+                                                              fit: BoxFit.cover,
+                                                              errorBuilder: (context, error, stackTrace) {
+                                                                return Container(
+                                                                  decoration: BoxDecoration(
+                                                                    gradient: AppColors.primaryGradient,
+                                                                    shape: BoxShape.circle,
+                                                                  ),
+                                                                  child: Center(
+                                                                    child: Text(
+                                                                      initials.isNotEmpty ? initials : 'C',
+                                                                      style: const TextStyle(
+                                                                        color: Colors.white,
+                                                                        fontSize: 16,
+                                                                        fontWeight: FontWeight.bold,
+                                                                      ),
+                                                                    ),
+                                                                  ),
+                                                                );
+                                                              },
+                                                              loadingBuilder: (context, child, loadingProgress) {
+                                                                if (loadingProgress == null) return child;
+                                                                return Container(
+                                                                  decoration: BoxDecoration(
+                                                                    gradient: AppColors.primaryGradient,
+                                                                    shape: BoxShape.circle,
+                                                                  ),
+                                                                  child: Center(
+                                                                    child: CircularProgressIndicator(
+                                                                      value: loadingProgress.expectedTotalBytes != null
+                                                                          ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                                                                          : null,
+                                                                      strokeWidth: 2,
+                                                                      valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                                                                    ),
+                                                                  ),
+                                                                );
+                                                              },
+                                                            ),
+                                                          )
+                                                        : Center(
+                                                            child: Text(
+                                                              initials.isNotEmpty ? initials : 'C',
+                                                              style: const TextStyle(
+                                                                color: Colors.white,
+                                                                fontSize: 16,
+                                                                fontWeight: FontWeight.bold,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                  );
+                                                },
                                               ),
                                               const SizedBox(width: 12),
                                               Expanded(

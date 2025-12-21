@@ -38,6 +38,231 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
   StreamSubscription<List<CoachingReport>>? _reportsSubscription;
   List<CoachingReport> _currentReports = [];
   CoachingReport? _selectedReport;
+  Map<String, String?> _mrProfilePictures = {}; // Map of MR ID -> profile_picture_url
+  Map<String, String?> _mrNamesToIds = {}; // Map of MR name -> MR ID for lookup
+  Map<String, String?> _dmRoles = {}; // Map of DM ID -> role
+  
+  // Loading and error states
+  bool _isLoadingProfiles = true;
+  int _profileRetryCount = 0;
+  int _rolesRetryCount = 0;
+  static const int _maxRetries = 3;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentReports = List.from(widget.reports);
+    _initializeData();
+    _startRealtimeUpdates();
+  }
+
+  /// Initialize all data loading operations with proper error handling
+  Future<void> _initializeData() async {
+    // Load profiles and roles in parallel, but handle errors gracefully
+    try {
+      await Future.wait([
+        _loadMRProfiles(),
+        _loadDMRoles(),
+      ], eagerError: false); // Don't stop on first error
+    } catch (e) {
+      debugPrint('❌ Error initializing data: $e');
+      // Errors are handled individually in each function
+    }
+  }
+
+  Future<void> _loadMRProfiles({bool isRetry = false}) async {
+    if (!isRetry && _profileRetryCount >= _maxRetries) {
+      debugPrint('   ⚠️ Max retries reached for MR profiles');
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _isLoadingProfiles = true;
+      });
+    }
+
+    try {
+      debugPrint('🖼️ Loading MR profile pictures... (attempt ${_profileRetryCount + 1})');
+      final mrs = await SupabaseService.getAllMRs();
+      
+      final profileMap = <String, String?>{};
+      final nameToIdMap = <String, String?>{};
+      
+      for (final mr in mrs) {
+        final id = (mr['id'] ?? '').toString();
+        final name = (mr['name'] ?? '').toString();
+        final profileUrl = mr['profile_picture_url']?.toString();
+        
+        if (id.isNotEmpty) {
+          profileMap[id] = profileUrl;
+        }
+        if (name.isNotEmpty && id.isNotEmpty) {
+          nameToIdMap[name] = id;
+        }
+      }
+      
+      debugPrint('   ✅ Loaded ${profileMap.length} MR profiles');
+      if (mounted) {
+        setState(() {
+          _mrProfilePictures = profileMap;
+          _mrNamesToIds = nameToIdMap;
+          _isLoadingProfiles = false;
+          _profileRetryCount = 0; // Reset on success
+        });
+      }
+    } catch (e) {
+      debugPrint('   ❌ Error loading MR profiles: $e');
+      _profileRetryCount++;
+      
+      if (mounted) {
+        setState(() {
+          _isLoadingProfiles = false;
+        });
+        
+        // Auto-retry with exponential backoff
+        if (_profileRetryCount < _maxRetries) {
+          final delay = Duration(seconds: _profileRetryCount * 2);
+          debugPrint('   🔄 Retrying in ${delay.inSeconds} seconds...');
+          Future.delayed(delay, () {
+            if (mounted) {
+              _loadMRProfiles(isRetry: true);
+            }
+          });
+        } else {
+          // Show error to user after max retries
+          if (mounted && _profileRetryCount == _maxRetries) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text('Failed to load profile pictures. Using default avatars.'),
+                backgroundColor: AppColors.warning,
+                duration: const Duration(seconds: 3),
+                action: SnackBarAction(
+                  label: 'Retry',
+                  textColor: Colors.white,
+                  onPressed: () {
+                    _profileRetryCount = 0;
+                    _loadMRProfiles();
+                  },
+                ),
+              ),
+            );
+          }
+        }
+      }
+    }
+  }
+
+  Future<void> _loadDMRoles({bool isRetry = false}) async {
+    if (!isRetry && _rolesRetryCount >= _maxRetries) {
+      debugPrint('   ⚠️ Max retries reached for DM roles');
+      return;
+    }
+
+    // Loading state handled internally, no UI indicator needed for roles
+
+    try {
+      debugPrint('👥 Loading DM roles... (attempt ${_rolesRetryCount + 1})');
+      // Get all DMs and FTs to get their roles
+      final dms = await SupabaseService.getAllDMs();
+      final fts = await SupabaseService.getAllFTs();
+      
+      final roleMap = <String, String?>{};
+      
+      // Add DMs
+      for (final dm in dms) {
+        final id = (dm['id'] ?? '').toString();
+        final role = (dm['role'] ?? 'dm').toString().toLowerCase();
+        if (id.isNotEmpty) {
+          roleMap[id] = role;
+        }
+      }
+      
+      // Add FTs
+      for (final ft in fts) {
+        final id = (ft['id'] ?? '').toString();
+        final role = (ft['role'] ?? 'ft').toString().toLowerCase();
+        if (id.isNotEmpty) {
+          roleMap[id] = role;
+        }
+      }
+      
+      debugPrint('   ✅ Loaded ${roleMap.length} DM/FT roles');
+      if (mounted) {
+        setState(() {
+          _dmRoles = roleMap;
+          _rolesRetryCount = 0; // Reset on success
+        });
+      }
+    } catch (e) {
+      debugPrint('   ❌ Error loading DM roles: $e');
+      _rolesRetryCount++;
+      
+      if (mounted) {
+        // Error state handled, continue with empty roles map
+        
+        // Auto-retry with exponential backoff
+        if (_rolesRetryCount < _maxRetries) {
+          final delay = Duration(seconds: _rolesRetryCount * 2);
+          debugPrint('   🔄 Retrying in ${delay.inSeconds} seconds...');
+          Future.delayed(delay, () {
+            if (mounted) {
+              _loadDMRoles(isRetry: true);
+            }
+          });
+        } else {
+          // Show error to user after max retries
+          if (mounted && _rolesRetryCount == _maxRetries) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text('Failed to load roles. Some role labels may be incorrect.'),
+                backgroundColor: AppColors.warning,
+                duration: const Duration(seconds: 3),
+                action: SnackBarAction(
+                  label: 'Retry',
+                  textColor: Colors.white,
+                  onPressed: () {
+                    _rolesRetryCount = 0;
+                    _loadDMRoles();
+                  },
+                ),
+              ),
+            );
+          }
+        }
+      }
+    }
+  }
+
+  String _getRoleLabel(String? role) {
+    switch (role?.toLowerCase()) {
+      case 'dm':
+        return 'District Manager';
+      case 'ft':
+        return 'Field Trainer';
+      case 'pm':
+        return 'Product Manager';
+      case 'msl':
+        return 'Medical Science Liaison';
+      default:
+        return 'Coach';
+    }
+  }
+
+  String? _getMRProfilePictureUrl(String mrId, String? mrName) {
+    // Try by ID first
+    if (_mrProfilePictures.containsKey(mrId)) {
+      return _mrProfilePictures[mrId];
+    }
+    // Try by name if ID not found
+    if (mrName != null && _mrNamesToIds.containsKey(mrName)) {
+      final id = _mrNamesToIds[mrName];
+      if (id != null && _mrProfilePictures.containsKey(id)) {
+        return _mrProfilePictures[id];
+      }
+    }
+    return null;
+  }
 
   Map<String, dynamic> _calculateStatsFromReports(List<CoachingReport> reports) {
     final now = DateTime.now();
@@ -54,7 +279,14 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
       }
     }).toList();
 
-    final allScores = thisMonthReports
+    // Filter only MR reports (exclude DM reports from Triple Visit)
+    final mrReports = thisMonthReports.where((r) {
+      // MR report: no DM feedback fields
+      return r.customerAwareness == null && r.medicalProductKnowledgeDM == null;
+    }).toList();
+
+    // Calculate average score only from MR reports
+    final allScores = mrReports
         .map((r) => r.getAverageScore())
         .where((s) => s > 0)
         .toList();
@@ -62,11 +294,32 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
         ? 0.0
         : allScores.reduce((a, b) => a + b) / allScores.length;
 
-    final uniqueMRs = thisMonthReports.map((r) => r.mrId).toSet().length;
-    final uniqueDMs = thisMonthReports.map((r) => r.dmId).toSet().length;
+    // Count unique MRs only from MR reports
+    final uniqueMRs = mrReports.map((r) => r.mrId).where((id) => id.isNotEmpty).toSet().length;
+    
+    // Count unique DMs from DM reports (Triple Visit)
+    final dmReports = thisMonthReports.where((r) {
+      // DM report: has DM feedback fields
+      return r.customerAwareness != null || r.medicalProductKnowledgeDM != null;
+    }).toList();
+    final uniqueDMs = dmReports.map((r) => r.mrId).where((id) => id.isNotEmpty).toSet().length;
+
+    // Calculate total visits: For Triple Visit, count as 1 visit (not 2)
+    // Group reports by date and typeOfVisit to handle Triple visits correctly
+    final visitDates = <String>{};
+    for (final report in thisMonthReports) {
+      if (report.typeOfVisit == 'Triple') {
+        // For Triple Visit, count the date only once
+        visitDates.add(report.date);
+      } else {
+        // For Single/Double, count each report as a separate visit
+        visitDates.add('${report.date}_${report.mrId}');
+      }
+    }
+    final totalVisits = visitDates.length;
 
     return {
-      'totalVisitsThisMonth': thisMonthReports.length,
+      'totalVisitsThisMonth': totalVisits, // Fixed: counts Triple Visit as 1 visit
       'averageScore': avgScore,
       'totalMRsCoached': uniqueMRs,
       'totalDMsCoached': uniqueDMs,
@@ -98,37 +351,50 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
     return monthlyData;
   }
 
+  // Use getDMScore() from CoachingReport model instead of local function
+  // This method is kept for backward compatibility but now delegates to the model
+  double _calculateDMScore(CoachingReport report) {
+    return report.getDMScore();
+  }
+
   List<Map<String, dynamic>> _calculateMRPerformanceFromReports(List<CoachingReport> reports) {
-    final mrStats = <String, Map<String, dynamic>>{};
+    final performanceStats = <String, Map<String, dynamic>>{};
 
     for (final report in reports) {
-      if (report.mrId.isEmpty || report.mrName.isEmpty) continue;
-      
-      final key = report.mrId;
-      if (!mrStats.containsKey(key)) {
-        mrStats[key] = {
-          'mrId': report.mrId,
-          'mrName': report.mrName,
-          'visitCount': 0,
-          'totalScore': 0.0,
-          'reports': <CoachingReport>[],
-        };
+      // Only process MR reports (exclude DM reports from Triple Visit)
+      // MR report: no DM feedback fields
+      if (report.mrId.isNotEmpty && report.mrName.isNotEmpty && 
+          report.customerAwareness == null && report.medicalProductKnowledgeDM == null) {
+        final key = 'mr_${report.mrId}';
+        if (!performanceStats.containsKey(key)) {
+          performanceStats[key] = {
+            'id': report.mrId,
+            'name': report.mrName,
+            'role': 'MR',
+            'visitCount': 0,
+            'totalScore': 0.0,
+            'reports': <CoachingReport>[],
+          };
+        }
+        performanceStats[key]!['visitCount'] = (performanceStats[key]!['visitCount'] as int) + 1;
+        performanceStats[key]!['reports'].add(report);
       }
-      
-      mrStats[key]!['visitCount'] = (mrStats[key]!['visitCount'] as int) + 1;
-      mrStats[key]!['reports'].add(report);
     }
 
-    return mrStats.values.map((stats) {
+    return performanceStats.values.map((stats) {
       final reports = stats['reports'] as List<CoachingReport>;
+      
+      // Calculate score for MR reports only
       final scores = reports.map((r) => r.getAverageScore()).where((s) => s > 0).toList();
+      
       final avgScore = scores.isEmpty
           ? 0.0
           : scores.reduce((a, b) => a + b) / scores.length;
 
       return {
-        'mrId': stats['mrId'],
-        'mrName': stats['mrName'],
+        'id': stats['id'],
+        'name': stats['name'],
+        'role': stats['role'],
         'visitCount': stats['visitCount'],
         'averageScore': avgScore,
       };
@@ -155,28 +421,38 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
       }
     }).toList();
 
-    final mrReports = <String, List<CoachingReport>>{};
+    final personReports = <String, Map<String, dynamic>>{};
     
     for (final report in thisMonthReports) {
-      if (report.mrId.isEmpty || report.mrName.isEmpty) continue;
-      
-      final key = '${report.mrId}_${report.mrName}';
-      if (!mrReports.containsKey(key)) {
-        mrReports[key] = [];
+      // Only process MR reports (exclude DM reports from Triple Visit)
+      // MR report: no DM feedback fields
+      if (report.mrId.isNotEmpty && report.mrName.isNotEmpty && 
+          report.customerAwareness == null && report.medicalProductKnowledgeDM == null) {
+        final key = 'mr_${report.mrId}';
+        if (!personReports.containsKey(key)) {
+          personReports[key] = {
+            'id': report.mrId,
+            'name': report.mrName,
+            'role': 'MR',
+            'reports': <CoachingReport>[],
+          };
+        }
+        personReports[key]!['reports'].add(report);
       }
-      mrReports[key]!.add(report);
     }
 
-    return mrReports.entries.map((entry) {
-      final [mrId, ...nameParts] = entry.key.split('_');
-      final mrName = nameParts.join('_');
-      
-      final sortedReports = List<CoachingReport>.from(entry.value)
+    return personReports.values.map((person) {
+      final reports = person['reports'] as List<CoachingReport>;
+      final sortedReports = List<CoachingReport>.from(reports)
         ..sort((a, b) => a.date.compareTo(b.date));
 
-      final visitScores = sortedReports.map((r) => <String, dynamic>{
-        'date': r.date,
-        'score': double.parse(r.getAverageScore().toStringAsFixed(2)),
+      // Calculate scores for MR reports only
+      final visitScores = sortedReports.map((r) {
+        final score = r.getAverageScore();
+        return <String, dynamic>{
+          'date': r.date,
+          'score': double.parse(score.toStringAsFixed(2)),
+        };
       }).toList();
 
       final totalScore = visitScores.fold<double>(0.0, (sum, v) => sum + (v['score'] as double));
@@ -185,8 +461,9 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
           : double.parse((totalScore / visitScores.length).toStringAsFixed(2));
 
       return {
-        'mrId': mrId,
-        'mrName': mrName,
+        'id': person['id'],
+        'name': person['name'],
+        'role': person['role'],
         'visitCount': visitScores.length,
         'visits': visitScores,
         'averageScore': averageScore,
@@ -199,12 +476,6 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
       });
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _currentReports = List.from(widget.reports);
-    _startRealtimeUpdates();
-  }
 
   void _startRealtimeUpdates() {
     if (widget.coachId != null && SupabaseService.isInitialized) {
@@ -423,7 +694,7 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 const Text(
-                                  'MR Performance Overview',
+                                  'DM - MR Performance Overview',
                                   style: TextStyle(
                                     color: AppColors.primaryBlue,
                                     fontSize: 18,
@@ -436,89 +707,116 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                   child: mrPerformance.isEmpty
                                       ? const Center(
                                           child: Text(
-                                            'No MR performance data available',
+                                            'No performance data available',
                                             style: TextStyle(color: AppColors.gray600),
                                           ),
                                         )
-                                      : BarChart(
-                                          BarChartData(
-                                            gridData: FlGridData(
-                                              show: true,
-                                              drawVerticalLine: false,
-                                              getDrawingHorizontalLine: (value) {
-                                                return FlLine(
-                                                  color: AppColors.gray200,
-                                                  strokeWidth: 1,
-                                                  dashArray: [3, 3],
-                                                );
-                                              },
-                                            ),
-                                            titlesData: FlTitlesData(
-                                              leftTitles: AxisTitles(
-                                                sideTitles: SideTitles(
-                                                  showTitles: true,
-                                                  reservedSize: 40,
-                                                  getTitlesWidget: (value, meta) {
-                                                    return Text(
-                                                      value.toInt().toString(),
-                                                      style: const TextStyle(
-                                                        color: AppColors.gray600,
-                                                        fontSize: 12,
-                                                      ),
+                                      : SingleChildScrollView(
+                                          scrollDirection: Axis.horizontal,
+                                          child: SizedBox(
+                                            width: (mrPerformance.length * 90.0).clamp(400.0, double.infinity),
+                                            child: BarChart(
+                                              BarChartData(
+                                                alignment: BarChartAlignment.spaceAround,
+                                                maxY: 6.0,
+                                                gridData: FlGridData(
+                                                  show: true,
+                                                  drawVerticalLine: false,
+                                                  getDrawingHorizontalLine: (value) {
+                                                    return FlLine(
+                                                      color: AppColors.gray200,
+                                                      strokeWidth: 1,
+                                                      dashArray: [3, 3],
                                                     );
                                                   },
                                                 ),
-                                              ),
-                                              bottomTitles: AxisTitles(
-                                                sideTitles: SideTitles(
-                                                  showTitles: true,
-                                                  reservedSize: 70,
-                                                  getTitlesWidget: (value, meta) {
-                                                    if (value.toInt() >= 0 && value.toInt() < mrPerformance.length) {
-                                                      return Padding(
-                                                        padding: const EdgeInsets.only(top: 8),
-                                                        child: RotatedBox(
-                                                          quarterTurns: 0,
-                                                          child: Text(
-                                                            mrPerformance[value.toInt()]['mrName'] as String,
-                                                            style: const TextStyle(
-                                                              color: AppColors.gray600,
-                                                              fontSize: 10,
-                                                            ),
-                                                            maxLines: 2,
-                                                            overflow: TextOverflow.ellipsis,
-                                                            textAlign: TextAlign.center,
+                                                titlesData: FlTitlesData(
+                                                  leftTitles: AxisTitles(
+                                                    sideTitles: SideTitles(
+                                                      showTitles: true,
+                                                      reservedSize: 40,
+                                                      getTitlesWidget: (value, meta) {
+                                                        return Text(
+                                                          value.toInt().toString(),
+                                                          style: const TextStyle(
+                                                            color: AppColors.gray600,
+                                                            fontSize: 12,
                                                           ),
-                                                        ),
-                                                      );
-                                                    }
-                                                    return const Text('');
-                                                  },
-                                                ),
-                                              ),
-                                              rightTitles: const AxisTitles(
-                                                sideTitles: SideTitles(showTitles: false),
-                                              ),
-                                              topTitles: const AxisTitles(
-                                                sideTitles: SideTitles(showTitles: false),
-                                              ),
-                                            ),
-                                            borderData: FlBorderData(show: false),
-                                            barGroups: mrPerformance.asMap().entries.map((entry) {
-                                              return BarChartGroupData(
-                                                x: entry.key,
-                                                barRods: [
-                                                  BarChartRodData(
-                                                    toY: entry.value['averageScore'] as double,
-                                                    color: AppColors.primaryCyan,
-                                                    width: 20,
-                                                    borderRadius: const BorderRadius.vertical(
-                                                      top: Radius.circular(8),
+                                                        );
+                                                      },
                                                     ),
                                                   ),
-                                                ],
-                                              );
-                                            }).toList(),
+                                                  bottomTitles: AxisTitles(
+                                                    sideTitles: SideTitles(
+                                                      showTitles: true,
+                                                      reservedSize: 100,
+                                                      getTitlesWidget: (value, meta) {
+                                                        if (value.toInt() >= 0 && value.toInt() < mrPerformance.length) {
+                                                          final person = mrPerformance[value.toInt()];
+                                                          final name = person['name'] as String? ?? person['mrName'] as String? ?? '';
+                                                          final role = person['role'] as String? ?? 'MR';
+                                                          return Padding(
+                                                            padding: const EdgeInsets.only(top: 8),
+                                                            child: SizedBox(
+                                                              width: 80,
+                                                              child: Column(
+                                                                mainAxisSize: MainAxisSize.min,
+                                                                mainAxisAlignment: MainAxisAlignment.center,
+                                                                crossAxisAlignment: CrossAxisAlignment.center,
+                                                                children: [
+                                                                  Text(
+                                                                    name,
+                                                                    style: const TextStyle(
+                                                                      color: AppColors.gray600,
+                                                                      fontSize: 9,
+                                                                    ),
+                                                                    maxLines: 1,
+                                                                    overflow: TextOverflow.ellipsis,
+                                                                    textAlign: TextAlign.center,
+                                                                  ),
+                                                                  const SizedBox(height: 2),
+                                                                  Text(
+                                                                    '($role)',
+                                                                    style: const TextStyle(
+                                                                      color: AppColors.gray600,
+                                                                      fontSize: 8,
+                                                                    ),
+                                                                    textAlign: TextAlign.center,
+                                                                  ),
+                                                                ],
+                                                              ),
+                                                            ),
+                                                          );
+                                                        }
+                                                        return const Text('');
+                                                      },
+                                                    ),
+                                                  ),
+                                                  rightTitles: const AxisTitles(
+                                                    sideTitles: SideTitles(showTitles: false),
+                                                  ),
+                                                  topTitles: const AxisTitles(
+                                                    sideTitles: SideTitles(showTitles: false),
+                                                  ),
+                                                ),
+                                                borderData: FlBorderData(show: false),
+                                                barGroups: mrPerformance.asMap().entries.map((entry) {
+                                                  return BarChartGroupData(
+                                                    x: entry.key,
+                                                    barRods: [
+                                                      BarChartRodData(
+                                                        toY: entry.value['averageScore'] as double,
+                                                        color: AppColors.primaryCyan,
+                                                        width: 30,
+                                                        borderRadius: const BorderRadius.vertical(
+                                                          top: Radius.circular(8),
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  );
+                                                }).toList(),
+                                              ),
+                                            ),
                                           ),
                                         ),
                                 ),
@@ -549,7 +847,7 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                         borderRadius: BorderRadius.circular(20),
                                       ),
                                       child: Text(
-                                        '${monthlyMRVisits.length} MR${monthlyMRVisits.length != 1 ? 's' : ''}',
+                                        '${monthlyMRVisits.length} ${monthlyMRVisits.length != 1 ? 'People' : 'Person'}',
                                         style: const TextStyle(
                                           color: AppColors.primaryBlue,
                                           fontSize: 12,
@@ -561,7 +859,7 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                 ),
                                 const SizedBox(height: 8),
                                 const Text(
-                                  'All Medical Representatives you visited this month with visit counts and scores',
+                                  'All people (DMs and MRs) you visited this month with visit counts and scores',
                                   style: TextStyle(
                                     color: AppColors.gray600,
                                     fontSize: 14,
@@ -590,13 +888,15 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                         ),
                                       )
                                     : Column(
-                                        children: monthlyMRVisits.map((mr) {
-                                          final visits = mr['visits'] as List<dynamic>;
-                                          final visitCount = mr['visitCount'] as int;
-                                          final mrName = mr['mrName'] as String;
-                                          final avgScore = mr['averageScore'] as double;
+                                        children: monthlyMRVisits.map((person) {
+                                          final visits = person['visits'] as List<dynamic>;
+                                          final visitCount = person['visitCount'] as int;
+                                          final personName = person['name'] as String;
+                                          final personId = person['id'] as String;
+                                          final personRole = person['role'] as String? ?? 'MR';
+                                          final avgScore = person['averageScore'] as double;
                                           // Get initials from name
-                                          final initials = mrName.split(' ')
+                                          final initials = personName.split(' ')
                                               .take(2)
                                               .map((e) => e.isNotEmpty ? e[0].toUpperCase() : '')
                                               .join();
@@ -604,6 +904,12 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                           final scoreColor = avgScore >= 5.0 ? AppColors.success 
                                               : avgScore >= 4.0 ? AppColors.warning 
                                               : AppColors.error;
+                                          
+                                          // Get role label
+                                          final roleLabel = personRole == 'MR' ? 'Medical Rep' 
+                                              : personRole == 'DM' ? 'District Manager'
+                                              : personRole == 'FT' ? 'Field Trainer'
+                                              : personRole;
                                           
                                           return Container(
                                             margin: const EdgeInsets.only(bottom: 16),
@@ -636,31 +942,83 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                                   ),
                                                   child: Row(
                                                     children: [
-                                                      // Avatar with initials
-                                                      Container(
-                                                        width: 50,
-                                                        height: 50,
-                                                        decoration: BoxDecoration(
-                                                          gradient: AppColors.primaryGradient,
-                                                          shape: BoxShape.circle,
-                                                          boxShadow: [
-                                                            BoxShadow(
-                                                              color: AppColors.primaryBlue.withOpacity(0.3),
-                                                              blurRadius: 8,
-                                                              offset: const Offset(0, 3),
+                                                      // Avatar - Show profile picture if available
+                                                      Builder(
+                                                        builder: (context) {
+                                                          final profileUrl = _getMRProfilePictureUrl(personId, personName);
+                                                          
+                                                          return Container(
+                                                            width: 50,
+                                                            height: 50,
+                                                            decoration: BoxDecoration(
+                                                              gradient: profileUrl == null ? AppColors.primaryGradient : null,
+                                                              shape: BoxShape.circle,
+                                                              border: profileUrl != null ? Border.all(color: AppColors.gray200, width: 2) : null,
+                                                              boxShadow: [
+                                                                BoxShadow(
+                                                                  color: AppColors.primaryBlue.withOpacity(0.3),
+                                                                  blurRadius: 8,
+                                                                  offset: const Offset(0, 3),
+                                                                ),
+                                                              ],
                                                             ),
-                                                          ],
-                                                        ),
-                                                        child: Center(
-                                                          child: Text(
-                                                            initials.isNotEmpty ? initials : 'MR',
-                                                            style: const TextStyle(
-                                                              color: Colors.white,
-                                                              fontSize: 18,
-                                                              fontWeight: FontWeight.bold,
-                                                            ),
-                                                          ),
-                                                        ),
+                                                            child: profileUrl != null && profileUrl.isNotEmpty
+                                                                ? ClipOval(
+                                                                    child: Image.network(
+                                                                      profileUrl,
+                                                                      width: 50,
+                                                                      height: 50,
+                                                                      fit: BoxFit.cover,
+                                                                      errorBuilder: (context, error, stackTrace) {
+                                                                        return Container(
+                                                                          decoration: BoxDecoration(
+                                                                            gradient: AppColors.primaryGradient,
+                                                                            shape: BoxShape.circle,
+                                                                          ),
+                                                                          child: Center(
+                                                                            child: Text(
+                                                                              initials.isNotEmpty ? initials : personRole,
+                                                                              style: const TextStyle(
+                                                                                color: Colors.white,
+                                                                                fontSize: 18,
+                                                                                fontWeight: FontWeight.bold,
+                                                                              ),
+                                                                            ),
+                                                                          ),
+                                                                        );
+                                                                      },
+                                                                      loadingBuilder: (context, child, loadingProgress) {
+                                                                        if (loadingProgress == null) return child;
+                                                                        return Container(
+                                                                          decoration: BoxDecoration(
+                                                                            gradient: AppColors.primaryGradient,
+                                                                            shape: BoxShape.circle,
+                                                                          ),
+                                                                          child: Center(
+                                                                            child: CircularProgressIndicator(
+                                                                              value: loadingProgress.expectedTotalBytes != null
+                                                                                  ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                                                                                  : null,
+                                                                              strokeWidth: 2,
+                                                                              valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                                                                            ),
+                                                                          ),
+                                                                        );
+                                                                      },
+                                                                    ),
+                                                                  )
+                                                                : Center(
+                                                                    child: Text(
+                                                                      initials.isNotEmpty ? initials : personRole,
+                                                                      style: const TextStyle(
+                                                                        color: Colors.white,
+                                                                        fontSize: 18,
+                                                                        fontWeight: FontWeight.bold,
+                                                                      ),
+                                                                    ),
+                                                                  ),
+                                                          );
+                                                        },
                                                       ),
                                                       const SizedBox(width: 10),
                                                       // Name and role
@@ -669,7 +1027,7 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                                           crossAxisAlignment: CrossAxisAlignment.start,
                                                           children: [
                                                             Text(
-                                                              mrName,
+                                                              personName,
                                                               style: const TextStyle(
                                                                 fontSize: 15,
                                                                 fontWeight: FontWeight.bold,
@@ -681,13 +1039,13 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                                             const SizedBox(height: 2),
                                                             Row(
                                                               children: [
-                                                                Icon(Icons.medical_services, 
+                                                                Icon(Icons.business, 
                                                                     size: 11, color: AppColors.gray600),
                                                                 const SizedBox(width: 3),
                                                                 Flexible(
                                                                   child: Text(
-                                                                    'Medical Rep',
-                                                                    style: TextStyle(
+                                                                    roleLabel,
+                                                                    style: const TextStyle(
                                                                       color: AppColors.gray600,
                                                                       fontSize: 11,
                                                                     ),
@@ -922,118 +1280,7 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                           ),
                                         ),
                                       )
-                                    : Column(
-                                        children: reports.take(5).map((report) {
-                                          return Container(
-                                            margin: const EdgeInsets.only(bottom: 12),
-                                            padding: const EdgeInsets.all(16),
-                                            decoration: BoxDecoration(
-                                              border: Border.all(color: AppColors.gray200),
-                                              borderRadius: BorderRadius.circular(12),
-                                            ),
-                                            child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                              children: [
-                                                Row(
-                                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                                  children: [
-                                                    Expanded(
-                                                      child: Text(
-                                                        report.mrName,
-                                                        style: const TextStyle(
-                                                          fontWeight: FontWeight.w600,
-                                                          fontSize: 16,
-                                                        ),
-                                                        overflow: TextOverflow.ellipsis,
-                                                      ),
-                                                    ),
-                                                    const SizedBox(width: 8),
-                                                    Text(
-                                                      report.date,
-                                                      style: const TextStyle(
-                                                        color: AppColors.gray600,
-                                                        fontSize: 12,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                                const SizedBox(height: 8),
-                                                Row(
-                                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                                  children: [
-                                                    Row(
-                                                      children: [
-                                                        Icon(Icons.star, color: AppColors.primaryBlue, size: 16),
-                                                        const SizedBox(width: 4),
-                                                        Text(
-                                                          '${report.getAverageScore().toStringAsFixed(1)}/6',
-                                                          style: const TextStyle(
-                                                            color: AppColors.primaryBlue,
-                                                            fontSize: 14,
-                                                            fontWeight: FontWeight.w600,
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    Container(
-                                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                                      decoration: BoxDecoration(
-                                                        color: AppColors.success.withOpacity(0.1),
-                                                        borderRadius: BorderRadius.circular(20),
-                                                      ),
-                                                      child: const Row(
-                                                        mainAxisSize: MainAxisSize.min,
-                                                        children: [
-                                                          Icon(Icons.check_circle, size: 12, color: AppColors.success),
-                                                          SizedBox(width: 4),
-                                                          Text(
-                                                            'Completed',
-                                                            style: TextStyle(
-                                                              color: AppColors.success,
-                                                              fontSize: 12,
-                                                              fontWeight: FontWeight.w500,
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                                const SizedBox(height: 12),
-                                                InkWell(
-                                                  onTap: () {
-                                                    setState(() {
-                                                      _selectedReport = report;
-                                                    });
-                                                  },
-                                                  child: Container(
-                                                    padding: const EdgeInsets.symmetric(vertical: 12),
-                                                    decoration: BoxDecoration(
-                                                      color: AppColors.primaryBlue.withOpacity(0.1),
-                                                      borderRadius: BorderRadius.circular(8),
-                                                    ),
-                                                    child: const Row(
-                                                      mainAxisAlignment: MainAxisAlignment.center,
-                                                      children: [
-                                                        Icon(Icons.visibility, color: AppColors.primaryBlue, size: 16),
-                                                        SizedBox(width: 8),
-                                                        Text(
-                                                          'View Details',
-                                                          style: TextStyle(
-                                                            color: AppColors.primaryBlue,
-                                                            fontSize: 14,
-                                                            fontWeight: FontWeight.w500,
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          );
-                                        }).toList(),
-                                      ),
+                                    : _buildRecentReportsList(reports),
                               ],
                             ),
                           ),
@@ -1163,7 +1410,263 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
   }
 
   double _calculateAvgScore(CoachingReport report) {
+    // For DM reports (has DM feedback fields), use DM score calculation
+    if (report.customerAwareness != null || report.medicalProductKnowledgeDM != null) {
+      return _calculateDMScore(report);
+    }
+    // For MR reports, use standard getAverageScore
     return report.getAverageScore();
+  }
+
+
+  Widget _buildRecentReportsList(List<CoachingReport> reports) {
+    // Only show MR reports (exclude DM reports from Triple Visit)
+    final mrReports = reports.where((r) {
+      // MR report: no DM feedback fields
+      return r.customerAwareness == null && r.medicalProductKnowledgeDM == null;
+    }).toList();
+    
+    // Sort by date (newest first) and take first 5
+    mrReports.sort((a, b) => b.date.compareTo(a.date));
+    final recentReports = mrReports.take(5).toList();
+    
+    if (recentReports.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32),
+          child: Text(
+            'No reports available',
+            style: TextStyle(color: AppColors.gray600),
+          ),
+        ),
+      );
+    }
+    
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: recentReports.map((report) {
+        // For MR reports, use mrId and mrName directly
+        final personName = report.mrName;
+        final personId = report.mrId;
+        final personRole = 'MR'; // Always MR for MR reports
+        final avgScore = report.getAverageScore();
+        final profileUrl = _getMRProfilePictureUrl(personId, personName);
+        final initials = personName.split(' ')
+            .take(2)
+            .map((e) => e.isNotEmpty ? e[0].toUpperCase() : '')
+            .join();
+        
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            border: Border.all(color: AppColors.gray200),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Avatar with loading state
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            gradient: profileUrl == null ? AppColors.primaryGradient : null,
+                            shape: BoxShape.circle,
+                            border: profileUrl != null ? Border.all(color: AppColors.gray200, width: 2) : null,
+                          ),
+                          child: _isLoadingProfiles
+                              ? const Center(
+                                  child: SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                    ),
+                                  ),
+                                )
+                              : profileUrl != null && profileUrl.isNotEmpty
+                                  ? ClipOval(
+                                      child: Image.network(
+                                        profileUrl,
+                                        width: 40,
+                                        height: 40,
+                                        fit: BoxFit.cover,
+                                        loadingBuilder: (context, child, loadingProgress) {
+                                          if (loadingProgress == null) return child;
+                                          return Container(
+                                            decoration: BoxDecoration(
+                                              gradient: AppColors.primaryGradient,
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: Center(
+                                              child: CircularProgressIndicator(
+                                                value: loadingProgress.expectedTotalBytes != null
+                                                    ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                                                    : null,
+                                                strokeWidth: 2,
+                                                valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                        errorBuilder: (context, error, stackTrace) {
+                                          return Container(
+                                            decoration: BoxDecoration(
+                                              gradient: AppColors.primaryGradient,
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: Center(
+                                              child: Text(
+                                                initials.isNotEmpty ? initials : personRole,
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    )
+                                  : Center(
+                                      child: Text(
+                                        initials.isNotEmpty ? initials : personRole,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                        ),
+                        const SizedBox(width: 12),
+                        Flexible(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                personName,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 16,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                _getRoleLabel(personRole == 'DM' ? 'dm' : (personRole == 'FT' ? 'ft' : 'mr')),
+                                style: const TextStyle(
+                                  color: AppColors.gray600,
+                                  fontSize: 12,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    report.date,
+                    style: const TextStyle(
+                      color: AppColors.gray600,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.star, color: AppColors.primaryBlue, size: 16),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${avgScore.toStringAsFixed(1)}/6',
+                        style: const TextStyle(
+                          color: AppColors.primaryBlue,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: AppColors.success.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.check_circle, size: 12, color: AppColors.success),
+                        SizedBox(width: 4),
+                        Text(
+                          'Completed',
+                          style: TextStyle(
+                            color: AppColors.success,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              InkWell(
+                onTap: () {
+                  setState(() {
+                    _selectedReport = report;
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryBlue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.visibility, color: AppColors.primaryBlue, size: 16),
+                      SizedBox(width: 8),
+                      Text(
+                        'View Details',
+                        style: TextStyle(
+                          color: AppColors.primaryBlue,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
   }
 
   Widget _buildModalSection(String title, List<Widget> children) {
@@ -1372,31 +1875,77 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                       children: [
                         Row(
                           children: [
-                            // Avatar
-                            Container(
-                              width: 56,
-                              height: 56,
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                shape: BoxShape.circle,
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.1),
-                                    blurRadius: 8,
-                                    offset: const Offset(0, 2),
+                            // Avatar - Show profile picture if available
+                            Builder(
+                              builder: (context) {
+                                final profileUrl = _getMRProfilePictureUrl(report.mrId, report.mrName);
+                                
+                                return Container(
+                                  width: 56,
+                                  height: 56,
+                                  decoration: BoxDecoration(
+                                    color: profileUrl == null ? Colors.white : null,
+                                    shape: BoxShape.circle,
+                                    border: profileUrl != null ? Border.all(color: Colors.white, width: 2) : null,
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.1),
+                                        blurRadius: 8,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ],
                                   ),
-                                ],
-                              ),
-                              child: Center(
-                                child: Text(
-                                  initials.isNotEmpty ? initials : 'MR',
-                                  style: const TextStyle(
-                                    color: AppColors.primaryBlue,
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
+                                  child: profileUrl != null && profileUrl.isNotEmpty
+                                      ? ClipOval(
+                                          child: Image.network(
+                                            profileUrl,
+                                            width: 56,
+                                            height: 56,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (context, error, stackTrace) {
+                                              return Container(
+                                                color: Colors.white,
+                                                child: Center(
+                                                  child: Text(
+                                                    initials.isNotEmpty ? initials : 'MR',
+                                                    style: const TextStyle(
+                                                      color: AppColors.primaryBlue,
+                                                      fontSize: 20,
+                                                      fontWeight: FontWeight.bold,
+                                                    ),
+                                                  ),
+                                                ),
+                                              );
+                                            },
+                                            loadingBuilder: (context, child, loadingProgress) {
+                                              if (loadingProgress == null) return child;
+                                              return Container(
+                                                color: Colors.white,
+                                                child: Center(
+                                                  child: CircularProgressIndicator(
+                                                    value: loadingProgress.expectedTotalBytes != null
+                                                        ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                                                        : null,
+                                                    strokeWidth: 2,
+                                                    valueColor: const AlwaysStoppedAnimation<Color>(AppColors.primaryBlue),
+                                                  ),
+                                                ),
+                                              );
+                                            },
+                                          ),
+                                        )
+                                      : Center(
+                                          child: Text(
+                                            initials.isNotEmpty ? initials : 'MR',
+                                            style: const TextStyle(
+                                              color: AppColors.primaryBlue,
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                );
+                              },
                             ),
                             const SizedBox(width: 14),
                             // Name and title
@@ -1503,7 +2052,10 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                               _buildModalInfoItem('Date', report.date),
                               _buildModalInfoItem('Average Score', '${avgScore.toStringAsFixed(2)} / 6.0'),
                               if (report.dmName.isNotEmpty)
-                                _buildModalInfoItem('District Manager', report.dmName),
+                                _buildModalInfoItem(
+                                  _getRoleLabel(_dmRoles[report.dmId]),
+                                  report.dmName,
+                                ),
                               _buildModalInfoItem('Medical Rep', report.mrName),
                               if (report.brickName != null && report.brickName!.isNotEmpty)
                                 _buildModalInfoItem('Brick Name', report.brickName!),
@@ -1568,7 +2120,10 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                               ),
                             const SizedBox(height: 24),
                             // MR Feedback
-                            if (report.punctuality != null || report.dressCode != null || report.pharmacyFeedback != null || report.mrFeedbackComments != null)
+                            if (report.punctuality != null || report.dressCode != null || report.pharmacyFeedback != null || 
+                                report.patientCentricApproach != null || report.medicalProductKnowledgeMR != null ||
+                                report.featureBenefits != null || report.closingCommitment != null ||
+                                report.engaging != null || report.mrFeedbackComments != null)
                               _buildModalSection(
                                 'MR Feedback',
                                 [
@@ -1578,8 +2133,16 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                     _buildModalYesNoItem('Dress Code', report.dressCode),
                                   if (report.pharmacyFeedback != null)
                                     _buildModalScoreItem('Pharmacy Feedback', report.pharmacyFeedback),
-                                  if (report.reviewProfile != null)
-                                    _buildModalScoreItem('Review Customer Profile', report.reviewProfile),
+                                  if (report.patientCentricApproach != null)
+                                    _buildModalScoreItem('Patient Centric Approach', report.patientCentricApproach),
+                                  if (report.medicalProductKnowledgeMR != null)
+                                    _buildModalScoreItem('Medical Product Knowledge (MR)', report.medicalProductKnowledgeMR),
+                                  if (report.featureBenefits != null)
+                                    _buildModalScoreItem('Feature Benefits', report.featureBenefits),
+                                  if (report.closingCommitment != null)
+                                    _buildModalScoreItem('Closing Commitment', report.closingCommitment),
+                                  if (report.engaging != null)
+                                    _buildModalScoreItem('Engaging Customer', report.engaging),
                                   if (report.mrFeedbackComments != null && report.mrFeedbackComments!.isNotEmpty)
                                     Container(
                                       margin: const EdgeInsets.only(bottom: 8),

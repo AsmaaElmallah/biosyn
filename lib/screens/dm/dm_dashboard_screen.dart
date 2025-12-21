@@ -8,6 +8,7 @@ import 'package:biosyn_report_flutter/utils/export_utils.dart';
 import 'package:biosyn_report_flutter/services/supabase_service.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'dart:async';
 
 class DMDashboardScreen extends StatefulWidget {
@@ -36,6 +37,114 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
   CoachingReport? _selectedReport;
   StreamSubscription<List<CoachingReport>>? _reportsSubscription;
   List<CoachingReport> _currentReports = [];
+  Map<String, String?> _mrProfilePictures = {}; // Map of MR ID -> profile_picture_url
+  Map<String, String?> _mrNamesToIds = {}; // Map of MR name -> MR ID for lookup
+
+  @override
+  void initState() {
+    super.initState();
+    _currentReports = List.from(widget.reports);
+    _loadMRProfiles();
+    _startRealtimeUpdates();
+  }
+
+  Future<void> _loadMRProfiles() async {
+    try {
+      debugPrint('🖼️ Loading MR profile pictures...');
+      final mrs = await SupabaseService.getAllMRs();
+      debugPrint('   📦 Fetched ${mrs.length} MRs from Supabase');
+      
+      final profileMap = <String, String?>{};
+      final nameToIdMap = <String, String?>{};
+      
+      for (final mr in mrs) {
+        final id = (mr['id'] ?? '').toString();
+        final name = (mr['name'] ?? '').toString();
+        final profileUrl = mr['profile_picture_url']?.toString();
+        
+        debugPrint('   👤 MR: id=$id, name=$name, profileUrl=${profileUrl ?? 'null'}');
+        
+        if (id.isNotEmpty) {
+          profileMap[id] = profileUrl;
+          if (profileUrl != null && profileUrl.isNotEmpty) {
+            debugPrint('      ✅ Added profile picture for $name (ID: $id)');
+          }
+        }
+        if (name.isNotEmpty && id.isNotEmpty) {
+          nameToIdMap[name] = id;
+        }
+      }
+      
+      final picturesCount = profileMap.values.where((url) => url != null && url.isNotEmpty).length;
+      debugPrint('   ✅ Loaded ${profileMap.length} MR profiles ($picturesCount with pictures)');
+      debugPrint('   📝 Name to ID map: ${nameToIdMap.length} entries');
+      if (mounted) {
+        setState(() {
+          _mrProfilePictures = profileMap;
+          _mrNamesToIds = nameToIdMap;
+        });
+      }
+    } catch (e) {
+      debugPrint('   ❌ Error loading MR profiles: $e');
+      debugPrint('   Stack trace: ${StackTrace.current}');
+    }
+  }
+
+  String? _getMRProfilePictureUrl(String mrId, String? mrName) {
+    debugPrint('   🔍 Looking for profile picture: mrId=$mrId, mrName=$mrName');
+    debugPrint('   📊 Available MR IDs: ${_mrProfilePictures.keys.toList()}');
+    debugPrint('   📊 Available MR names: ${_mrNamesToIds.keys.toList()}');
+    
+    // Try by ID first
+    if (mrId.isNotEmpty && _mrProfilePictures.containsKey(mrId)) {
+      final url = _mrProfilePictures[mrId];
+      debugPrint('   ✅ Found by ID: $url');
+      return url;
+    }
+    
+    // Try by name if ID not found
+    if (mrName != null && mrName.isNotEmpty && _mrNamesToIds.containsKey(mrName)) {
+      final id = _mrNamesToIds[mrName];
+      debugPrint('   🔍 Found ID by name: $id');
+      if (id != null && _mrProfilePictures.containsKey(id)) {
+        final url = _mrProfilePictures[id];
+        debugPrint('   ✅ Found by name: $url');
+        return url;
+      }
+    }
+    
+    // Try case-insensitive name match
+    if (mrName != null && mrName.isNotEmpty) {
+      for (final entry in _mrNamesToIds.entries) {
+        if (entry.key.toLowerCase().trim() == mrName.toLowerCase().trim()) {
+          final id = entry.value;
+          if (id != null && _mrProfilePictures.containsKey(id)) {
+            final url = _mrProfilePictures[id];
+            debugPrint('   ✅ Found by case-insensitive name match: $url');
+            return url;
+          }
+        }
+      }
+    }
+    
+    debugPrint('   ❌ Profile picture not found');
+    return null;
+  }
+
+  String _getCoachRoleLabel(String? role) {
+    switch (role?.toLowerCase()) {
+      case 'dm':
+        return 'District Manager';
+      case 'ft':
+        return 'Field Trainer';
+      case 'pm':
+        return 'Product Manager';
+      case 'msl':
+        return 'Medical Science Liaison';
+      default:
+        return 'District Manager'; // Default for backward compatibility
+    }
+  }
 
   Map<String, dynamic> _calculateStatsFromReports(List<CoachingReport> reports) {
     final now = DateTime.now();
@@ -137,12 +246,6 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
     return mrPerformance;
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _currentReports = List.from(widget.reports);
-    _startRealtimeUpdates();
-  }
 
   @override
   void didUpdateWidget(DMDashboardScreen oldWidget) {
@@ -638,31 +741,84 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                                           ),
                                           child: Row(
                                             children: [
-                                              // Avatar with initials
-                                              Container(
-                                                width: 50,
-                                                height: 50,
-                                                decoration: BoxDecoration(
-                                                  gradient: AppColors.primaryGradient,
-                                                  shape: BoxShape.circle,
-                                                  boxShadow: [
-                                                    BoxShadow(
-                                                      color: AppColors.primaryBlue.withOpacity(0.3),
-                                                      blurRadius: 8,
-                                                      offset: const Offset(0, 3),
+                                              // Avatar - Show profile picture if available
+                                              Builder(
+                                                builder: (context) {
+                                                  final mrId = mr['mrId'] as String? ?? '';
+                                                  final profileUrl = _getMRProfilePictureUrl(mrId, mrName);
+                                                  
+                                                  return Container(
+                                                    width: 50,
+                                                    height: 50,
+                                                    decoration: BoxDecoration(
+                                                      gradient: profileUrl == null ? AppColors.primaryGradient : null,
+                                                      shape: BoxShape.circle,
+                                                      border: profileUrl != null ? Border.all(color: AppColors.gray200, width: 2) : null,
+                                                      boxShadow: [
+                                                        BoxShadow(
+                                                          color: AppColors.primaryBlue.withOpacity(0.3),
+                                                          blurRadius: 8,
+                                                          offset: const Offset(0, 3),
+                                                        ),
+                                                      ],
                                                     ),
-                                                  ],
-                                                ),
-                                                child: Center(
-                                                  child: Text(
-                                                    initials.isNotEmpty ? initials : 'MR',
-                                                    style: const TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 18,
-                                                      fontWeight: FontWeight.bold,
-                                                    ),
-                                                  ),
-                                                ),
+                                                    child: profileUrl != null && profileUrl.isNotEmpty
+                                                        ? ClipOval(
+                                                            child: Image.network(
+                                                              profileUrl,
+                                                              width: 50,
+                                                              height: 50,
+                                                              fit: BoxFit.cover,
+                                                              errorBuilder: (context, error, stackTrace) {
+                                                                return Container(
+                                                                  decoration: BoxDecoration(
+                                                                    gradient: AppColors.primaryGradient,
+                                                                    shape: BoxShape.circle,
+                                                                  ),
+                                                                  child: Center(
+                                                                    child: Text(
+                                                                      initials.isNotEmpty ? initials : 'MR',
+                                                                      style: const TextStyle(
+                                                                        color: Colors.white,
+                                                                        fontSize: 18,
+                                                                        fontWeight: FontWeight.bold,
+                                                                      ),
+                                                                    ),
+                                                                  ),
+                                                                );
+                                                              },
+                                                              loadingBuilder: (context, child, loadingProgress) {
+                                                                if (loadingProgress == null) return child;
+                                                                return Container(
+                                                                  decoration: BoxDecoration(
+                                                                    gradient: AppColors.primaryGradient,
+                                                                    shape: BoxShape.circle,
+                                                                  ),
+                                                                  child: Center(
+                                                                    child: CircularProgressIndicator(
+                                                                      value: loadingProgress.expectedTotalBytes != null
+                                                                          ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                                                                          : null,
+                                                                      strokeWidth: 2,
+                                                                      valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                                                                    ),
+                                                                  ),
+                                                                );
+                                                              },
+                                                            ),
+                                                          )
+                                                        : Center(
+                                                            child: Text(
+                                                              initials.isNotEmpty ? initials : 'MR',
+                                                              style: const TextStyle(
+                                                                color: Colors.white,
+                                                                fontSize: 18,
+                                                                fontWeight: FontWeight.bold,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                  );
+                                                },
                                               ),
                                               const SizedBox(width: 10),
                                               // Name and role
@@ -1299,6 +1455,46 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
     );
   }
 
+  Widget _buildModalInfoItemWithAction(String label, String actionText, VoidCallback onAction) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: AppColors.gray600,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                TextButton.icon(
+                  onPressed: onAction,
+                  icon: const Icon(Icons.map, size: 16),
+                  label: Text(actionText),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.primaryCyan,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      side: const BorderSide(color: AppColors.primaryCyan, width: 1.5),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildModalInfoItem(String label, String value) {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -1482,31 +1678,77 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                     children: [
                       Row(
                         children: [
-                          // Avatar
-                          Container(
-                            width: 56,
-                            height: 56,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.1),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 2),
+                          // Avatar - Show profile picture if available
+                          Builder(
+                            builder: (context) {
+                              final profileUrl = _getMRProfilePictureUrl(report.mrId, report.mrName);
+                              
+                              return Container(
+                                width: 56,
+                                height: 56,
+                                decoration: BoxDecoration(
+                                  color: profileUrl == null ? Colors.white : null,
+                                  shape: BoxShape.circle,
+                                  border: profileUrl != null ? Border.all(color: Colors.white, width: 2) : null,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.1),
+                                      blurRadius: 8,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
                                 ),
-                              ],
-                            ),
-                            child: Center(
-                              child: Text(
-                                initials.isNotEmpty ? initials : 'MR',
-                                style: const TextStyle(
-                                  color: AppColors.primaryBlue,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
+                                child: profileUrl != null && profileUrl.isNotEmpty
+                                    ? ClipOval(
+                                        child: Image.network(
+                                          profileUrl,
+                                          width: 56,
+                                          height: 56,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (context, error, stackTrace) {
+                                            return Container(
+                                              color: Colors.white,
+                                              child: Center(
+                                                child: Text(
+                                                  initials.isNotEmpty ? initials : 'MR',
+                                                  style: const TextStyle(
+                                                    color: AppColors.primaryBlue,
+                                                    fontSize: 20,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                          loadingBuilder: (context, child, loadingProgress) {
+                                            if (loadingProgress == null) return child;
+                                            return Container(
+                                              color: Colors.white,
+                                              child: Center(
+                                                child: CircularProgressIndicator(
+                                                  value: loadingProgress.expectedTotalBytes != null
+                                                      ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                                                      : null,
+                                                  strokeWidth: 2,
+                                                  valueColor: const AlwaysStoppedAnimation<Color>(AppColors.primaryBlue),
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      )
+                                    : Center(
+                                        child: Text(
+                                          initials.isNotEmpty ? initials : 'MR',
+                                          style: const TextStyle(
+                                            color: AppColors.primaryBlue,
+                                            fontSize: 20,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                              );
+                            },
                           ),
                           const SizedBox(width: 14),
                           // Name and title
@@ -1612,8 +1854,55 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                           [
                             _buildModalInfoItem('Date', report.date),
                             _buildModalInfoItem('Average Score', '${avgScore.toStringAsFixed(2)} / 6.0'),
-                            _buildModalInfoItem('District Manager', report.dmName),
+                            _buildModalInfoItem(_getCoachRoleLabel(report.coachRole), report.dmName),
                             _buildModalInfoItem('Medical Rep', report.mrName),
+                            if (report.brickName != null && report.brickName!.isNotEmpty)
+                              _buildModalInfoItem('Brick Name', report.brickName!),
+                            if (report.locationName != null && report.locationName!.isNotEmpty)
+                              _buildModalInfoItem('Location', report.locationName!),
+                            if (report.brickLocationLat != null && report.brickLocationLng != null)
+                              _buildModalInfoItem(
+                                'Coordinates',
+                                '${report.brickLocationLat!.toStringAsFixed(6)}, ${report.brickLocationLng!.toStringAsFixed(6)}',
+                              ),
+                            if (report.googleMapsUrl != null && report.googleMapsUrl!.isNotEmpty)
+                              _buildModalInfoItemWithAction(
+                                'Google Maps',
+                                'View on Maps',
+                                () async {
+                                  final uri = Uri.parse(report.googleMapsUrl!);
+                                  if (await canLaunchUrl(uri)) {
+                                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                  }
+                                },
+                              ),
+                            if (report.visitCount != null && report.visitCount! > 0)
+                              _buildModalInfoItem('Visit Count', report.visitCount.toString()),
+                            if (report.doctorsVisited != null && report.doctorsVisited!.isNotEmpty)
+                              _buildModalInfoItem('Doctors Visited', report.doctorsVisited!),
+                            if (report.isQuickSession == true)
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: AppColors.error.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: AppColors.error, width: 1.5),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.close, color: AppColors.error, size: 18),
+                                    const SizedBox(width: 8),
+                                    const Text(
+                                      'Quick Session (No Plan)',
+                                      style: TextStyle(
+                                        color: AppColors.error,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                           ],
                         ),
                         const SizedBox(height: 24),

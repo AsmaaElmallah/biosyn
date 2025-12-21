@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:biosyn_report_flutter/theme/colors.dart';
 import 'package:biosyn_report_flutter/models/coaching_report.dart';
-import 'package:biosyn_report_flutter/services/supabase_service.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -15,7 +14,7 @@ class PMMSLCoachingFormScreen extends StatefulWidget {
   final String? mrId; // Optional - if provided, pre-select MR
   final String? mrName; // Optional - if provided, pre-select MR
   final bool isQuickSession; // True if started without a plan
-  final Function(CoachingReport) onSubmit;
+  final Future<void> Function(CoachingReport) onSubmit;
   final VoidCallback onBack;
 
   const PMMSLCoachingFormScreen({
@@ -42,26 +41,47 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
   final Map<String, String?> _formData = {};
   final _formKey = GlobalKey<FormState>();
 
-  final List<Map<String, String>> _sections = [
-    {'title': 'Basic Information', 'key': 'basic'},
-    {'title': 'Visit Details', 'key': 'visit'},
-    {'title': 'DM Feedback', 'key': 'dmFeedback'},
-    {'title': 'MR Feedback', 'key': 'mrFeedback'},
-    {'title': 'Comments & Insights', 'key': 'comments'},
-  ];
+  // Get sections dynamically based on Type of Visit
+  List<Map<String, String>> get _sections {
+    final typeOfVisit = _formData['typeOfVisit'];
+    final baseSections = [
+      {'title': 'Basic Information', 'key': 'basic'},
+    ];
+    
+    if (typeOfVisit == 'Double') {
+      // Double: Skip DM Feedback, show only MR Feedback
+      return [
+        ...baseSections,
+        {'title': 'MR Feedback', 'key': 'mrFeedback'},
+        {'title': 'Comments & Insights', 'key': 'comments'},
+      ];
+    } else if (typeOfVisit == 'Triple') {
+      // Triple: Show both DM and MR Feedback
+      return [
+        ...baseSections,
+        {'title': 'DM Feedback', 'key': 'dmFeedback'},
+        {'title': 'MR Feedback', 'key': 'mrFeedback'},
+        {'title': 'Comments & Insights', 'key': 'comments'},
+      ];
+    } else {
+      // Single: Default - show all sections
+      return [
+        ...baseSections,
+        {'title': 'DM Feedback', 'key': 'dmFeedback'},
+        {'title': 'MR Feedback', 'key': 'mrFeedback'},
+        {'title': 'Comments & Insights', 'key': 'comments'},
+      ];
+    }
+  }
 
   // Controllers
   late final TextEditingController _areaBrickNameController;
-  late final TextEditingController _visitedAccountsController;
   late final TextEditingController _generalFeedbackController;
   late final TextEditingController _dmFeedbackCommentsController;
   late final TextEditingController _mrFeedbackCommentsController;
   late final TextEditingController _doctorsVisitedController;
 
-  // Dropdown data
-  List<Map<String, dynamic>> _dmsAndFTs = [];
-  List<Map<String, dynamic>> _mrs = [];
-  bool _loadingDropdowns = true;
+  // Dropdown data - no longer needed, DM and MR are passed from previous screen
 
   // Location
   Position? _currentPosition;
@@ -86,19 +106,17 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
     }
     
     _areaBrickNameController = TextEditingController();
-    _visitedAccountsController = TextEditingController();
     _generalFeedbackController = TextEditingController();
     _dmFeedbackCommentsController = TextEditingController();
     _mrFeedbackCommentsController = TextEditingController();
     _doctorsVisitedController = TextEditingController();
 
-    _loadDropdowns();
+    // No need to load dropdowns - DM and MR are passed from previous screen
   }
 
   @override
   void dispose() {
     _areaBrickNameController.dispose();
-    _visitedAccountsController.dispose();
     _generalFeedbackController.dispose();
     _dmFeedbackCommentsController.dispose();
     _mrFeedbackCommentsController.dispose();
@@ -106,25 +124,6 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
     super.dispose();
   }
 
-  Future<void> _loadDropdowns() async {
-    setState(() => _loadingDropdowns = true);
-    try {
-      final dmsAndFTs = await SupabaseService.getAllDMsAndFTs();
-      final mrs = await SupabaseService.getAllMRs();
-      setState(() {
-        _dmsAndFTs = dmsAndFTs;
-        _mrs = mrs;
-        _loadingDropdowns = false;
-      });
-    } catch (e) {
-      setState(() => _loadingDropdowns = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to load dropdowns: $e')),
-        );
-      }
-    }
-  }
 
   Future<void> _getCurrentLocation() async {
     setState(() => _locationLoading = true);
@@ -419,16 +418,38 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
   }
 
   bool _validateSection() {
-    final requiredFields = {
-      0: ['dmId', 'mrId', 'areaBrickName', 'typeOfVisit'],
-      1: ['visitedAccountsNames'],
-      2: ['customerAwareness', 'medicalProductKnowledgeDM'],
-      3: ['punctuality', 'dressCode', 'pharmacyFeedback'],
-      4: [], // Comments section - optional
-    };
+    // Ensure current section is within bounds
+    if (_currentSection >= _sections.length) {
+      return false;
+    }
+    
+    final typeOfVisit = _formData['typeOfVisit'];
+    final sectionKey = _sections[_currentSection]['key'];
+    
+    // Define required fields based on section key
+    List<String> requiredFields = [];
+    
+    switch (sectionKey) {
+      case 'basic':
+        requiredFields = ['dmId', 'mrId', 'areaBrickName', 'typeOfVisit'];
+        break;
+      case 'dmFeedback':
+        // Only required for Triple
+        if (typeOfVisit == 'Triple') {
+          requiredFields = ['customerAwareness', 'medicalProductKnowledgeDM'];
+        }
+        break;
+      case 'mrFeedback':
+        // Required for all types
+        requiredFields = ['punctuality', 'dressCode', 'pharmacyFeedback'];
+        break;
+      case 'comments':
+        // Optional
+        requiredFields = [];
+        break;
+    }
 
-    final fields = requiredFields[_currentSection] ?? [];
-    return fields.every((field) => _formData[field] != null && _formData[field]!.isNotEmpty);
+    return requiredFields.every((field) => _formData[field] != null && _formData[field]!.isNotEmpty);
   }
 
   void _handleNext() {
@@ -438,6 +459,8 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
       );
       return;
     }
+    
+    // Move to next section
     if (_currentSection < _sections.length - 1) {
       setState(() {
         _currentSection++;
@@ -453,7 +476,7 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
     }
   }
 
-  void _handleSubmit() {
+  Future<void> _handleSubmit() async {
     if (!_validateSection()) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please complete all required fields')),
@@ -461,15 +484,9 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
       return;
     }
 
-    // Get selected DM and MR names
-    final selectedDM = _dmsAndFTs.firstWhere(
-      (dm) => (dm['id'] ?? '').toString() == _formData['dmId'],
-      orElse: () => {},
-    );
-    final selectedMR = _mrs.firstWhere(
-      (mr) => (mr['id'] ?? '').toString() == _formData['mrId'],
-      orElse: () => {},
-    );
+    // Get DM and MR names from widget (passed from previous screen)
+    final selectedDMName = widget.dmName ?? '';
+    final selectedMRName = widget.mrName ?? '';
 
     // For PM/MSL: dmId in report should be the coach ID (PM/MSL ID), not the selected DM
     // The selected DM is the one being coached, but dm_id in Supabase is the coach ID
@@ -477,8 +494,9 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
     debugPrint('   coachId: ${widget.coachId}');
     debugPrint('   coachName: ${widget.coachName}');
     debugPrint('   coachRole: ${widget.coachRole}');
-    debugPrint('   selectedDMId: ${_formData['dmId']}');
-    debugPrint('   selectedDMName: ${selectedDM['name']}');
+    debugPrint('   selectedDMId: ${_formData['dmId'] ?? widget.dmId}');
+    debugPrint('   selectedDMName: $selectedDMName');
+    debugPrint('   selectedMRName: $selectedMRName');
     debugPrint('   typeOfVisit: ${_formData['typeOfVisit']}');
     
     // Helper function to create a report
@@ -506,7 +524,7 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
         // PM/MSL Specific Fields
         areaBrickName: _areaBrickNameController.text.trim().isNotEmpty ? _areaBrickNameController.text.trim() : null,
         typeOfVisit: _formData['typeOfVisit'],
-        visitedAccountsNames: _visitedAccountsController.text.trim().isNotEmpty ? _visitedAccountsController.text.trim() : null,
+        visitedAccountsNames: null, // Removed - Visit Details section deleted
         generalFeedback: _generalFeedbackController.text.trim().isNotEmpty ? _generalFeedbackController.text.trim() : null,
         customerAwareness: _formData['customerAwareness'],
         medicalProductKnowledgeDM: _formData['medicalProductKnowledgeDM'],
@@ -526,45 +544,124 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
       );
     }
 
-    // Check if Double Visit - create two separate reports
-    if (_formData['typeOfVisit'] == 'Double') {
-      debugPrint('📝 Double Visit detected - creating two reports');
+    final typeOfVisit = _formData['typeOfVisit'];
+    
+    if (typeOfVisit == 'Double') {
+      // Double: Only MR Feedback - create one report for MR only
+      debugPrint('📝 Double Visit - creating one report for MR only');
+      
+      final mrReport = createReport(
+        mrId: _formData['mrId'] ?? widget.mrId ?? '',
+        mrName: selectedMRName,
+      );
+      
+      try {
+        await widget.onSubmit(mrReport);
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Double visit: Report submitted successfully for MR!'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 3),
+            ),
+          );
+          // Navigate back after report is submitted
+          widget.onBack();
+        }
+      } catch (e) {
+        debugPrint('❌ Error submitting Double visit report: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error submitting report: $e'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      }
+    } else if (typeOfVisit == 'Triple') {
+      // Triple: Both DM and MR Feedback - create two reports
+      debugPrint('📝 Triple Visit - creating two reports: one for DM and one for MR');
       
       // Report 1: For Medical Representative (MR)
       final mrReport = createReport(
-        mrId: _formData['mrId'] ?? '',
-        mrName: (selectedMR['name'] ?? '').toString(),
+        mrId: _formData['mrId'] ?? widget.mrId ?? '',
+        mrName: selectedMRName,
       );
       
       // Report 2: For District Manager (DM) - use selected DM as the "MR" in this report
       final dmReport = createReport(
-        mrId: _formData['dmId'] ?? '', // Use DM ID as "MR" ID for DM report
-        mrName: (selectedDM['name'] ?? '').toString(), // Use DM name as "MR" name
+        mrId: _formData['dmId'] ?? widget.dmId ?? '', // Use DM ID as "MR" ID for DM report
+        mrName: selectedDMName, // Use DM name as "MR" name
         dmId: widget.coachId, // Coach ID
         dmName: widget.coachName, // Coach name
       );
       
-      // Submit both reports
-      widget.onSubmit(mrReport);
-      widget.onSubmit(dmReport);
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Double visit: Two reports submitted successfully!'),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 3),
-          ),
-        );
+      // Submit both reports sequentially
+      try {
+        await widget.onSubmit(mrReport);
+        await widget.onSubmit(dmReport);
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Triple visit: Two reports submitted successfully (one for DM and one for MR)!'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 3),
+            ),
+          );
+          // Navigate back after both reports are submitted
+          widget.onBack();
+        }
+      } catch (e) {
+        debugPrint('❌ Error submitting Triple visit reports: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error submitting reports: $e'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
       }
     } else {
-      // Single visit - create one report
+      // Single: Default - create one report for MR
+      debugPrint('📝 Single Visit - creating one report for MR');
+      
       final report = createReport(
-        mrId: _formData['mrId'] ?? '',
-        mrName: (selectedMR['name'] ?? '').toString(),
+        mrId: _formData['mrId'] ?? widget.mrId ?? '',
+        mrName: selectedMRName,
       );
       
-      widget.onSubmit(report);
+      try {
+        await widget.onSubmit(report);
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Report submitted successfully!'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
+          );
+          // Navigate back after report is submitted
+          widget.onBack();
+        }
+      } catch (e) {
+        debugPrint('❌ Error submitting Single visit report: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error submitting report: $e'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      }
     }
   }
 
@@ -696,7 +793,9 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
                             Align(
                               alignment: Alignment.centerLeft,
                               child: Text(
-                                _sections[_currentSection]['title'] ?? '',
+                                _currentSection < _sections.length 
+                                    ? (_sections[_currentSection]['title'] ?? '')
+                                    : '',
                                 style: const TextStyle(
                                   color: AppColors.primaryBlue,
                                   fontSize: 18,
@@ -841,16 +940,21 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
   }
 
   Widget _buildSectionContent() {
-    switch (_currentSection) {
-      case 0:
+    // Ensure current section is within bounds
+    if (_currentSection >= _sections.length) {
+      return const SizedBox();
+    }
+    
+    final sectionKey = _sections[_currentSection]['key'];
+    
+    switch (sectionKey) {
+      case 'basic':
         return _buildBasicInformation();
-      case 1:
-        return _buildVisitDetails();
-      case 2:
+      case 'dmFeedback':
         return _buildDMFeedback();
-      case 3:
+      case 'mrFeedback':
         return _buildMRFeedback();
-      case 4:
+      case 'comments':
         return _buildComments();
       default:
         return const SizedBox();
@@ -869,48 +973,20 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
         const SizedBox(height: 24),
         _buildTextField(
           label: 'Coach',
-          value: '${widget.coachName} - ${widget.coachId}',
+          value: widget.coachName,
           enabled: false,
         ),
         const SizedBox(height: 24),
-        _buildDropdownField(
-          label: 'DM / Field Trainer *',
-          value: _formData['dmId'],
-          items: _dmsAndFTs.map((dm) {
-            final id = (dm['id'] ?? '').toString();
-            final name = (dm['name'] ?? '').toString();
-            // Show only name in dropdown to avoid overflow
-            return DropdownMenuItem(
-              value: id,
-              child: Text(
-                name,
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1,
-              ),
-            );
-          }).toList(),
-          onChanged: (value) => _updateField('dmId', value ?? ''),
-          isLoading: _loadingDropdowns,
+        _buildTextField(
+          label: 'District Manager *',
+          value: widget.dmName ?? '',
+          enabled: false,
         ),
         const SizedBox(height: 24),
-        _buildDropdownField(
+        _buildTextField(
           label: 'Medical Representative (MR) *',
-          value: _formData['mrId'],
-          items: _mrs.map((mr) {
-            final id = (mr['id'] ?? '').toString();
-            final name = (mr['name'] ?? '').toString();
-            // Show only name in dropdown to avoid overflow
-            return DropdownMenuItem(
-              value: id,
-              child: Text(
-                name,
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1,
-              ),
-            );
-          }).toList(),
-          onChanged: (value) => _updateField('mrId', value ?? ''),
-          isLoading: _loadingDropdowns,
+          value: widget.mrName ?? '',
+          enabled: false,
         ),
         const SizedBox(height: 24),
         TextField(
@@ -939,12 +1015,28 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
           label: 'Type of Visit *',
           value: _formData['typeOfVisit'],
           items: const [
-            DropdownMenuItem(value: 'DM', child: Text('DM')),
             DropdownMenuItem(value: 'Single', child: Text('Single')),
             DropdownMenuItem(value: 'Double', child: Text('Double')),
             DropdownMenuItem(value: 'Triple', child: Text('Triple')),
           ],
-          onChanged: (value) => _updateField('typeOfVisit', value ?? ''),
+          onChanged: (value) {
+            // Save current section index before changing type
+            final savedSectionIndex = _currentSection;
+            
+            _updateField('typeOfVisit', value ?? '');
+            
+            // Stay in same section if it's Basic Info (0)
+            // This allows user to complete all fields before moving to next section
+            setState(() {
+              // If we're in Basic Info, stay there
+              if (savedSectionIndex == 0) {
+                _currentSection = savedSectionIndex;
+              } else {
+                // If we're in a feedback section, go back to Basic Info
+                _currentSection = 0;
+              }
+            });
+          },
         ),
         const SizedBox(height: 24),
         // Location Picker
@@ -1083,39 +1175,6 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
     );
   }
 
-  Widget _buildVisitDetails() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        TextField(
-          controller: _visitedAccountsController,
-          maxLines: 4,
-          textDirection: TextDirection.ltr,
-          textAlign: TextAlign.left,
-          keyboardType: TextInputType.multiline,
-          onChanged: (value) => _updateField('visitedAccountsNames', value),
-          decoration: InputDecoration(
-            labelText: 'Visited Accounts Names *',
-            hintText: 'Enter account names...',
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.gray200, width: 2),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.gray200, width: 2),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.primaryCyan, width: 2),
-            ),
-            filled: true,
-            fillColor: Colors.white,
-          ),
-        ),
-      ],
-    );
-  }
 
   Widget _buildDMFeedback() {
     return Column(
@@ -1491,76 +1550,98 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
         Text(
           label,
           style: const TextStyle(
+            color: AppColors.gray700,
             fontSize: 16,
             fontWeight: FontWeight.w600,
-            color: AppColors.gray700,
           ),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
         ),
         const SizedBox(height: 16),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          alignment: WrapAlignment.start,
-          children: List.generate(6, (index) {
-            final value = (index + 1).toString();
-            final isSelected = _formData[field] == value;
-            return GestureDetector(
-              onTap: () => _updateField(field, value),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                curve: Curves.easeInOut,
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  gradient: isSelected
-                      ? AppColors.primaryGradient
-                      : null,
-                  color: isSelected ? null : Colors.white,
-                  shape: BoxShape.circle, // Circular buttons
-                  border: Border.all(
-                    color: isSelected
-                        ? AppColors.primaryCyan
-                        : AppColors.gray300,
-                    width: isSelected ? 3 : 2,
-                  ),
-                  boxShadow: isSelected
-                      ? [
-                          BoxShadow(
-                            color: AppColors.primaryCyan.withOpacity(0.4),
-                            blurRadius: 12,
-                            offset: const Offset(0, 6),
-                            spreadRadius: 0,
+        LayoutBuilder(
+          builder: (context, constraints) {
+            // Increased spacing from 8 to 12
+            final spacing = 12.0;
+            final buttonWidth = (constraints.maxWidth - (5 * spacing)) / 6;
+            return Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: List.generate(6, (index) {
+                final rating = (index + 1).toString();
+                final isSelected = _formData[field] == rating;
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOutBack,
+                  width: buttonWidth,
+                  transform: isSelected 
+                      ? (Matrix4.identity()..scale(1.05))
+                      : Matrix4.identity(),
+                  transformAlignment: Alignment.center,
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () => _updateField(field, rating),
+                      borderRadius: BorderRadius.circular(14),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        // Increased vertical padding from 12 to 16
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        decoration: BoxDecoration(
+                          gradient: isSelected
+                              ? AppColors.primaryGradientHorizontal
+                              : null,
+                          color: isSelected ? null : Colors.white,
+                          border: Border.all(
+                            color: isSelected
+                                ? Colors.transparent
+                                : AppColors.gray300,
+                            width: 2,
                           ),
-                          BoxShadow(
-                            color: AppColors.primaryBlue.withOpacity(0.2),
-                            blurRadius: 8,
-                            offset: const Offset(0, 3),
-                            spreadRadius: 0,
-                          ),
-                        ]
-                      : [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.05),
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                ),
-                child: Center(
-                  child: Text(
-                    value,
-                    style: TextStyle(
-                      color: isSelected
-                          ? Colors.white
-                          : AppColors.gray700,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 20,
+                          borderRadius: BorderRadius.circular(14),
+                          boxShadow: isSelected
+                              ? [
+                                  BoxShadow(
+                                    color: AppColors.primaryBlue.withOpacity(0.4),
+                                    blurRadius: 12,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ]
+                              : [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.05),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              rating,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: isSelected ? Colors.white : AppColors.gray700,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            if (isSelected) ...[
+                              const SizedBox(height: 2),
+                              const Icon(
+                                Icons.check_circle,
+                                color: Colors.white,
+                                size: 14,
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
+                );
+              }),
             );
-          }),
+          },
         ),
       ],
     );

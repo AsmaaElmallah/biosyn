@@ -244,10 +244,38 @@ class _AppNavigatorState extends State<AppNavigator> {
           }
           debugPrint('   ✅ New reports added from Supabase: $newReportsAdded');
           
-          // If GM and local is empty but Supabase has data, use Supabase data directly
-          if (_selectedRole == 'gm' && reports.isEmpty && supabaseReports.isNotEmpty) {
-            reports = supabaseReports;
-            debugPrint('   Using Supabase reports directly for GM');
+          // For GM: Remove local reports that no longer exist in Supabase
+          if (_selectedRole == 'gm' && supabaseFetchSucceeded) {
+            debugPrint('   🗑️ Checking for deleted reports in Supabase...');
+            final supabaseReportIds = supabaseReports.map((r) => '${r.mrId}_${r.date}_${r.coachRole ?? 'null'}').toSet();
+            final reportsToDelete = <String>[];
+            
+            for (final localReport in reports) {
+              final reportId = '${localReport.mrId}_${localReport.date}_${localReport.coachRole ?? 'null'}';
+              if (!supabaseReportIds.contains(reportId)) {
+                reportsToDelete.add(reportId);
+                debugPrint('   🗑️ Report to delete (not in Supabase): $reportId');
+              }
+            }
+            
+            if (reportsToDelete.isNotEmpty) {
+              debugPrint('   🗑️ Deleting ${reportsToDelete.length} reports from local database...');
+              for (final reportId in reportsToDelete) {
+                await DatabaseService.deleteReport(reportId);
+              }
+              // Remove from reports list
+              reports = reports.where((r) {
+                final reportId = '${r.mrId}_${r.date}_${r.coachRole ?? 'null'}';
+                return !reportsToDelete.contains(reportId);
+              }).toList();
+              debugPrint('   ✅ Deleted ${reportsToDelete.length} reports from local database');
+            }
+            
+            // If local is empty but Supabase has data, use Supabase data directly
+            if (reports.isEmpty && supabaseReports.isNotEmpty) {
+              reports = supabaseReports;
+              debugPrint('   Using Supabase reports directly for GM');
+            }
           }
           
           // Sort by date (newest first)

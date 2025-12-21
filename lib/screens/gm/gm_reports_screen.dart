@@ -33,6 +33,63 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
   bool _showFilters = false;
   CoachingReport? _selectedReport;
   Map<String, String> _mrRoles = {}; // Map of MR ID to role
+  Map<String, String?> _mrProfilePictures = {}; // Map of MR ID -> profile_picture_url
+  Map<String, String?> _mrNamesToIds = {}; // Map of MR name -> MR ID for lookup
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMRProfiles();
+    _loadMRRoles();
+  }
+
+  Future<void> _loadMRProfiles() async {
+    try {
+      debugPrint('🖼️ Loading MR profile pictures...');
+      final mrs = await SupabaseService.getAllMRs();
+      
+      final profileMap = <String, String?>{};
+      final nameToIdMap = <String, String?>{};
+      
+      for (final mr in mrs) {
+        final id = (mr['id'] ?? '').toString();
+        final name = (mr['name'] ?? '').toString();
+        final profileUrl = mr['profile_picture_url']?.toString();
+        
+        if (id.isNotEmpty) {
+          profileMap[id] = profileUrl;
+        }
+        if (name.isNotEmpty && id.isNotEmpty) {
+          nameToIdMap[name] = id;
+        }
+      }
+      
+      debugPrint('   ✅ Loaded ${profileMap.length} MR profiles');
+      if (mounted) {
+        setState(() {
+          _mrProfilePictures = profileMap;
+          _mrNamesToIds = nameToIdMap;
+        });
+      }
+    } catch (e) {
+      debugPrint('   ❌ Error loading MR profiles: $e');
+    }
+  }
+
+  String? _getMRProfilePictureUrl(String mrId, String? mrName) {
+    // Try by ID first
+    if (_mrProfilePictures.containsKey(mrId)) {
+      return _mrProfilePictures[mrId];
+    }
+    // Try by name if ID not found
+    if (mrName != null && _mrNamesToIds.containsKey(mrName)) {
+      final id = _mrNamesToIds[mrName];
+      if (id != null && _mrProfilePictures.containsKey(id)) {
+        return _mrProfilePictures[id];
+      }
+    }
+    return null;
+  }
 
   List<String> get _uniqueDMs {
     // Include coach name with role for PM/MSL
@@ -160,12 +217,6 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
     } catch (e) {
       debugPrint('❌ Error loading MR roles: $e');
     }
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _loadMRRoles();
   }
 
   void _clearFilters() {
@@ -559,26 +610,83 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                                         padding: const EdgeInsets.all(16),
                                         child: Row(
                                           children: [
-                                            // Avatar
-                                            Container(
-                                              width: 52,
-                                              height: 52,
-                                              decoration: BoxDecoration(
-                                                gradient: const LinearGradient(
-                                                  colors: [Color(0xFF10B981), Color(0xFF059669)],
-                                                ),
-                                                shape: BoxShape.circle,
-                                              ),
-                                              child: Center(
-                                                child: Text(
-                                                  report.mrName.split(' ').take(2).map((e) => e.isNotEmpty ? e[0].toUpperCase() : '').join(),
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 18,
-                                                    fontWeight: FontWeight.bold,
+                                            // Avatar - Show profile picture if available
+                                            Builder(
+                                              builder: (context) {
+                                                final profileUrl = _getMRProfilePictureUrl(report.mrId, report.mrName);
+                                                final initials = report.mrName.split(' ').take(2).map((e) => e.isNotEmpty ? e[0].toUpperCase() : '').join();
+                                                
+                                                return Container(
+                                                  width: 52,
+                                                  height: 52,
+                                                  decoration: BoxDecoration(
+                                                    gradient: profileUrl == null ? const LinearGradient(
+                                                      colors: [Color(0xFF10B981), Color(0xFF059669)],
+                                                    ) : null,
+                                                    shape: BoxShape.circle,
+                                                    border: profileUrl != null ? Border.all(color: AppColors.gray200, width: 2) : null,
                                                   ),
-                                                ),
-                                              ),
+                                                  child: profileUrl != null && profileUrl.isNotEmpty
+                                                      ? ClipOval(
+                                                          child: Image.network(
+                                                            profileUrl,
+                                                            width: 52,
+                                                            height: 52,
+                                                            fit: BoxFit.cover,
+                                                            errorBuilder: (context, error, stackTrace) {
+                                                              return Container(
+                                                                decoration: const BoxDecoration(
+                                                                  gradient: LinearGradient(
+                                                                    colors: [Color(0xFF10B981), Color(0xFF059669)],
+                                                                  ),
+                                                                  shape: BoxShape.circle,
+                                                                ),
+                                                                child: Center(
+                                                                  child: Text(
+                                                                    initials,
+                                                                    style: const TextStyle(
+                                                                      color: Colors.white,
+                                                                      fontSize: 18,
+                                                                      fontWeight: FontWeight.bold,
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                              );
+                                                            },
+                                                            loadingBuilder: (context, child, loadingProgress) {
+                                                              if (loadingProgress == null) return child;
+                                                              return Container(
+                                                                decoration: const BoxDecoration(
+                                                                  gradient: LinearGradient(
+                                                                    colors: [Color(0xFF10B981), Color(0xFF059669)],
+                                                                  ),
+                                                                  shape: BoxShape.circle,
+                                                                ),
+                                                                child: Center(
+                                                                  child: CircularProgressIndicator(
+                                                                    value: loadingProgress.expectedTotalBytes != null
+                                                                        ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                                                                        : null,
+                                                                    strokeWidth: 2,
+                                                                    valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                                                                  ),
+                                                                ),
+                                                              );
+                                                            },
+                                                          ),
+                                                        )
+                                                      : Center(
+                                                          child: Text(
+                                                            initials,
+                                                            style: const TextStyle(
+                                                              color: Colors.white,
+                                                              fontSize: 18,
+                                                              fontWeight: FontWeight.bold,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                );
+                                              },
                                             ),
                                             const SizedBox(width: 12),
                                             Expanded(
@@ -950,7 +1058,6 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                           _buildModalInfoItem('Average Score', '${avgScore.toStringAsFixed(2)} / 6.0'),
                           _buildModalInfoItem('Coach Role', '${_getCoachRoleLabel(report.coachRole)}: ${report.dmName}'),
                           _buildModalInfoItem('Coached Person Role', '${_getRoleLabel(_mrRoles[report.mrId] ?? 'MR')}: ${report.mrName}'),
-                          _buildModalInfoItem('Medical Rep ID', report.mrId),
                           if (report.isQuickSession == true)
                             _buildModalInfoItem('Session Type', 'Quick Session (No Plan)'),
                         ],

@@ -105,7 +105,8 @@ class _PMPlanningScreenState extends State<PMPlanningScreen> {
     });
 
     try {
-      final dms = await SupabaseService.getAllDMsAndFTs();
+      // Fetch only District Managers (role = 'dm'), not Field Trainers
+      final dms = await SupabaseService.getAllDMs();
       setState(() {
         _districtManagers = dms
             .map((u) => {
@@ -216,13 +217,9 @@ class _PMPlanningScreenState extends State<PMPlanningScreen> {
           mrName: _getSelectedMRName(),
           isQuickSession: isQuickSession,
           onSubmit: (report) async {
-            widget.onReportSubmit(report);
-            Navigator.pop(context);
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Coaching report submitted successfully!')),
-              );
-            }
+            await widget.onReportSubmit(report);
+            // Don't pop here - let the form handle navigation after all reports are submitted
+            // This is especially important for Triple Visit which submits 2 reports
           },
           onBack: () => Navigator.pop(context),
         ),

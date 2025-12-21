@@ -274,8 +274,11 @@ class CoachingReport {
     );
   }
 
+  /// Calculate average score for MR reports
+  /// Includes both DM/FT fields and PM/MSL specific fields
   double getAverageScore() {
     final scores = [
+      // DM/FT Form Fields
       pharmacyFeedback,
       reviewProfile,
       brandBonding,
@@ -293,10 +296,58 @@ class CoachingReport {
       askCommitment,
       bridging,
       selfAssessment,
+      // PM/MSL Specific Fields for MR
+      patientCentricApproach,
+      medicalProductKnowledgeMR,
+      featureBenefits,
+      closingCommitment,
     ].where((s) => s != null).map((s) => double.tryParse(s!) ?? 0.0).toList();
 
     if (scores.isEmpty) return 0.0;
     return scores.reduce((a, b) => a + b) / scores.length;
+  }
+
+  /// Calculate DM score based on customerAwareness and medicalProductKnowledgeDM
+  /// Low = 2, Medium = 4, High = 6
+  /// Returns 0.0 if no DM feedback fields are present
+  double getDMScore() {
+    // If this is not a DM report (no DM feedback fields), return 0
+    if (customerAwareness == null && medicalProductKnowledgeDM == null) {
+      return 0.0;
+    }
+
+    double totalScore = 0.0;
+    int count = 0;
+    
+    if (customerAwareness != null && customerAwareness!.isNotEmpty) {
+      final awareness = customerAwareness!.toLowerCase();
+      if (awareness == 'low') {
+        totalScore += 2.0;
+        count++;
+      } else if (awareness == 'medium') {
+        totalScore += 4.0;
+        count++;
+      } else if (awareness == 'high') {
+        totalScore += 6.0;
+        count++;
+      }
+    }
+    
+    if (medicalProductKnowledgeDM != null && medicalProductKnowledgeDM!.isNotEmpty) {
+      final knowledge = medicalProductKnowledgeDM!.toLowerCase();
+      if (knowledge == 'low') {
+        totalScore += 2.0;
+        count++;
+      } else if (knowledge == 'medium') {
+        totalScore += 4.0;
+        count++;
+      } else if (knowledge == 'high') {
+        totalScore += 6.0;
+        count++;
+      }
+    }
+    
+    return count > 0 ? totalScore / count : 0.0;
   }
 }
 

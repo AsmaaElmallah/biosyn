@@ -670,13 +670,23 @@ class SupabaseService {
       debugPrint('   Fetching MRs from users table...');
       final response = await client!
           .from('users')
-          .select()
+          .select('id, name, profile_picture_url, role, status')
           .eq('role', 'mr')
           .eq('status', 'active')
           .order('name', ascending: true);
 
-      debugPrint('   ✅ Got ${(response as List).length} MRs from Supabase');
-      return List<Map<String, dynamic>>.from(response);
+      final mrs = List<Map<String, dynamic>>.from(response);
+      debugPrint('   ✅ Got ${mrs.length} MRs from Supabase');
+      
+      // Debug: Check if profile_picture_url is present
+      for (final mr in mrs) {
+        final id = mr['id']?.toString() ?? 'unknown';
+        final name = mr['name']?.toString() ?? 'unknown';
+        final profileUrl = mr['profile_picture_url']?.toString();
+        debugPrint('   👤 MR: id=$id, name=$name, hasProfilePicture=${profileUrl != null && profileUrl.isNotEmpty}');
+      }
+      
+      return mrs;
     } catch (e) {
       debugPrint('   ❌ Error: $e');
       throw Exception('Failed to get MRs: $e');
