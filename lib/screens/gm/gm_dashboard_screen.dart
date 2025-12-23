@@ -1,19 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:biosyn_report_flutter/theme/colors.dart';
+import 'package:biosyn_report_flutter/theme/text_styles.dart';
+import 'package:biosyn_report_flutter/theme/spacing.dart';
+import 'package:biosyn_report_flutter/widgets/app_card.dart';
 import 'package:biosyn_report_flutter/widgets/bottom_nav.dart';
 import 'package:biosyn_report_flutter/widgets/app_header.dart';
 import 'package:biosyn_report_flutter/widgets/connectivity_indicator.dart';
 import 'package:biosyn_report_flutter/widgets/sync_status_indicator.dart';
+import 'package:biosyn_report_flutter/screens/gm/gm_notifications_screen.dart';
 import 'package:biosyn_report_flutter/models/coaching_report.dart';
 import 'package:biosyn_report_flutter/services/supabase_service.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/foundation.dart';
+import 'dart:async';
 
 class GMDashboardScreen extends StatefulWidget {
   final List<CoachingReport> allReports;
   final VoidCallback onExport;
   final String activeTab;
   final Function(String) onTabChange;
+  final String? gmId;
 
   const GMDashboardScreen({
     super.key,
@@ -21,6 +27,7 @@ class GMDashboardScreen extends StatefulWidget {
     required this.onExport,
     required this.activeTab,
     required this.onTabChange,
+    this.gmId,
   });
 
   @override
@@ -29,11 +36,58 @@ class GMDashboardScreen extends StatefulWidget {
 
 class _GMDashboardScreenState extends State<GMDashboardScreen> {
   Map<String, String?> _coachProfilePictures = {}; // Map of coach name -> profile_picture_url
+  int _unreadNotificationsCount = 0;
+  Timer? _notificationsTimer;
 
   @override
   void initState() {
     super.initState();
     _loadCoachProfiles();
+    if (widget.gmId != null) {
+      _loadUnreadNotificationsCount();
+      // Refresh notifications count every 30 seconds
+      _notificationsTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+        _loadUnreadNotificationsCount();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _notificationsTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadUnreadNotificationsCount() async {
+    if (widget.gmId == null) return;
+    
+    try {
+      final count = await SupabaseService.getUnreadNotificationsCount(widget.gmId!);
+      if (mounted) {
+        setState(() {
+          _unreadNotificationsCount = count;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading unread notifications count: $e');
+    }
+  }
+
+  void _openNotifications() {
+    if (widget.gmId == null) return;
+    
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => GMNotificationsScreen(
+          gmId: widget.gmId!,
+          activeTab: widget.activeTab,
+          onTabChange: widget.onTabChange,
+        ),
+      ),
+    ).then((_) {
+      // Refresh count when returning from notifications screen
+      _loadUnreadNotificationsCount();
+    });
   }
 
   Future<void> _loadCoachProfiles() async {
@@ -349,21 +403,60 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
           children: [
             // Connectivity Indicator
             const ConnectivityIndicator(),
-            // Header
-            const AppHeader(
+            // Header with notifications bell
+            AppHeader(
               title: 'GM Dashboard',
               subtitle: 'Organization-wide coaching analytics',
+              trailing: widget.gmId != null
+                  ? Stack(
+                      children: [
+                        IconButton(
+                          icon: const Icon(
+                            Icons.notifications_outlined,
+                            color: Colors.white,
+                            size: 28,
+                          ),
+                          onPressed: _openNotifications,
+                        ),
+                        if (_unreadNotificationsCount > 0)
+                          Positioned(
+                            right: 8,
+                            top: 8,
+                            child: Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: const BoxDecoration(
+                                color: Colors.red,
+                                shape: BoxShape.circle,
+                              ),
+                              constraints: const BoxConstraints(
+                                minWidth: 18,
+                                minHeight: 18,
+                              ),
+                              child: Text(
+                                _unreadNotificationsCount > 9 ? '9+' : '$_unreadNotificationsCount',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ),
+                      ],
+                    )
+                  : null,
             ),
             // Content
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(24),
+                padding: AppSpacing.screenPadding,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     // Sync Status Indicator
                     const SyncStatusIndicator(),
-                    const SizedBox(height: 16),
+                    AppSpacing.vertical(AppSpacing.lg),
                   // Stats Cards
                   Row(
                     children: [
@@ -427,99 +520,125 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
                           ),
                         ),
                         const SizedBox(height: 16),
-                        // Horizontal scrollable chart container
-                        SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: SizedBox(
-                            width: dmPerformance.length > 5 
-                                ? (dmPerformance.length * 80.0).clamp(400.0, double.infinity)
-                                : MediaQuery.of(context).size.width - 48,
-                            height: 300,
-                            child: BarChart(
-                              BarChartData(
-                                gridData: FlGridData(
-                                  show: true,
-                                  drawVerticalLine: false,
-                                  getDrawingHorizontalLine: (value) {
-                                    return FlLine(
-                                      color: AppColors.gray200,
-                                      strokeWidth: 1,
-                                      dashArray: [3, 3],
-                                    );
-                                  },
-                                ),
-                                titlesData: FlTitlesData(
-                                  leftTitles: AxisTitles(
-                                    sideTitles: SideTitles(
-                                      showTitles: true,
-                                      reservedSize: 40,
-                                      getTitlesWidget: (value, meta) {
-                                        return Text(
-                                          value.toInt().toString(),
-                                          style: const TextStyle(
-                                            color: AppColors.gray600,
-                                            fontSize: 11,
-                                          ),
-                                        );
-                                      },
-                                    ),
+                        SizedBox(
+                          height: 250,
+                          child: dmPerformance.isEmpty
+                              ? const Center(
+                                  child: Text(
+                                    'No performance data available',
+                                    style: TextStyle(color: AppColors.gray600),
                                   ),
-                                  bottomTitles: AxisTitles(
-                                    sideTitles: SideTitles(
-                                      showTitles: true,
-                                      reservedSize: 100, // Increased for rotated text
-                                      getTitlesWidget: (value, meta) {
-                                        if (value.toInt() >= 0 && value.toInt() < dmPerformance.length) {
-                                          return Padding(
-                                            padding: const EdgeInsets.only(top: 8),
-                                            child: RotatedBox(
-                                              quarterTurns: 1, // Rotate 45 degrees (90 degrees)
-                                              child: Text(
-                                                dmPerformance[value.toInt()]['name'] as String,
-                                                style: const TextStyle(
-                                                  color: AppColors.gray600,
-                                                  fontSize: 9,
-                                                ),
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                textAlign: TextAlign.center,
-                                              ),
+                                )
+                              : SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
+                                  child: SizedBox(
+                                    width: (dmPerformance.length * 90.0)
+                                        .clamp(300.0, double.infinity),
+                                    child: BarChart(
+                                      BarChartData(
+                                        alignment: BarChartAlignment.spaceAround,
+                                        gridData: FlGridData(
+                                          show: true,
+                                          drawVerticalLine: false,
+                                          getDrawingHorizontalLine: (value) {
+                                            return FlLine(
+                                              color: AppColors.gray200,
+                                              strokeWidth: 1,
+                                              dashArray: [3, 3],
+                                            );
+                                          },
+                                        ),
+                                        titlesData: FlTitlesData(
+                                          leftTitles: AxisTitles(
+                                            sideTitles: SideTitles(
+                                              showTitles: true,
+                                              reservedSize: 40,
+                                              getTitlesWidget: (value, meta) {
+                                                return Text(
+                                                  value.toInt().toString(),
+                                                  style: const TextStyle(
+                                                    color: AppColors.gray600,
+                                                    fontSize: 12,
+                                                  ),
+                                                );
+                                              },
                                             ),
+                                          ),
+                                          bottomTitles: AxisTitles(
+                                            sideTitles: SideTitles(
+                                              showTitles: true,
+                                              reservedSize: 80,
+                                              getTitlesWidget: (value, meta) {
+                                                if (value.toInt() >= 0 &&
+                                                    value.toInt() <
+                                                        dmPerformance.length) {
+                                                  final name =
+                                                      dmPerformance[value.toInt()]
+                                                              ['name']
+                                                          as String? ??
+                                                      '';
+                                                  return Padding(
+                                                    padding:
+                                                        const EdgeInsets.only(
+                                                            top: 8),
+                                                    child: SizedBox(
+                                                      width: 70,
+                                                      child: Text(
+                                                        name,
+                                                        style: const TextStyle(
+                                                          color:
+                                                              AppColors.gray600,
+                                                          fontSize: 9,
+                                                        ),
+                                                        maxLines: 2,
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                        textAlign:
+                                                            TextAlign.center,
+                                                      ),
+                                                    ),
+                                                  );
+                                                }
+                                                return const Text('');
+                                              },
+                                            ),
+                                          ),
+                                          rightTitles: const AxisTitles(
+                                            sideTitles:
+                                                SideTitles(showTitles: false),
+                                          ),
+                                          topTitles: const AxisTitles(
+                                            sideTitles:
+                                                SideTitles(showTitles: false),
+                                          ),
+                                        ),
+                                        borderData:
+                                            FlBorderData(show: false),
+                                        barGroups: dmPerformance
+                                            .asMap()
+                                            .entries
+                                            .map((entry) {
+                                          return BarChartGroupData(
+                                            x: entry.key,
+                                            barRods: [
+                                              BarChartRodData(
+                                                toY: (entry.value['visits']
+                                                        as int)
+                                                    .toDouble(),
+                                                color: AppColors.primaryCyan,
+                                                width: 20,
+                                                borderRadius:
+                                                    const BorderRadius.vertical(
+                                                  top: Radius.circular(8),
+                                                ),
+                                              ),
+                                            ],
                                           );
-                                        }
-                                        return const Text('');
-                                      },
-                                    ),
-                                  ),
-                                rightTitles: const AxisTitles(
-                                  sideTitles: SideTitles(showTitles: false),
-                                ),
-                                topTitles: const AxisTitles(
-                                  sideTitles: SideTitles(showTitles: false),
-                                ),
-                              ),
-                              borderData: FlBorderData(show: false),
-                              barGroups: dmPerformance.asMap().entries.map((entry) {
-                                return BarChartGroupData(
-                                  x: entry.key,
-                                  barRods: [
-                                    BarChartRodData(
-                                      toY: (entry.value['visits'] as int).toDouble(),
-                                      color: AppColors.primaryBlue,
-                                      width: 25,
-                                      borderRadius: const BorderRadius.vertical(
-                                        top: Radius.circular(8),
+                                        }).toList(),
                                       ),
                                     ),
-                                  ],
-                                );
-                              }).toList(),
-                              maxY: dmPerformance.isEmpty
-                                  ? 10
-                                  : (dmPerformance.map((e) => e['visits'] as int).reduce((a, b) => a > b ? a : b) * 1.2),
-                            ),
-                          ),
-                          ),
+                                  ),
+                                ),
                         ),
                       ],
                     ),
@@ -1125,19 +1244,8 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
     IconData icon,
     Color color,
   ) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
+    return AppCard(
+      padding: AppSpacing.cardPadding,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1155,30 +1263,20 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
               const Spacer(),
             ],
           ),
-          const SizedBox(height: 12),
+          AppSpacing.vertical(AppSpacing.md),
           Text(
             title,
-            style: const TextStyle(
-              color: AppColors.gray600,
-              fontSize: 12,
-            ),
+            style: AppTextStyles.bodySmall,
           ),
-          const SizedBox(height: 4),
+          AppSpacing.vertical(AppSpacing.xs),
           Text(
             value,
-            style: TextStyle(
-              color: color,
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-            ),
+            style: AppTextStyles.h2.copyWith(color: color),
           ),
-          const SizedBox(height: 4),
+          AppSpacing.vertical(AppSpacing.xs),
           Text(
             subtitle,
-            style: const TextStyle(
-              color: AppColors.gray600,
-              fontSize: 10,
-            ),
+            style: AppTextStyles.caption,
           ),
         ],
       ),
@@ -1186,19 +1284,8 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
   }
 
   Widget _buildCard({required Widget child}) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
+    return AppCard(
+      padding: AppSpacing.paddingXL,
       child: child,
     );
   }

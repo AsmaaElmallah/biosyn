@@ -1,13 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:biosyn_report_flutter/theme/colors.dart';
+import 'package:biosyn_report_flutter/theme/text_styles.dart';
+import 'package:biosyn_report_flutter/theme/spacing.dart';
+import 'package:biosyn_report_flutter/utils/responsive.dart';
 
 class AppHeader extends StatelessWidget {
   final String title;
   final String subtitle;
+  final Widget? trailing;
+  final VoidCallback? onTrailingTap;
 
   const AppHeader({
     super.key,
     required this.title,
     required this.subtitle,
+    this.trailing,
+    this.onTrailingTap,
   });
 
   @override
@@ -19,8 +27,8 @@ class AppHeader extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Color(0xFF0077B6),
-            Color(0xFF00A8E8),
+            AppColors.primaryBlue,
+            AppColors.primaryCyan,
           ],
         ),
         borderRadius: BorderRadius.only(
@@ -28,28 +36,41 @@ class AppHeader extends StatelessWidget {
           bottomRight: Radius.circular(20),
         ),
       ),
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+      padding: EdgeInsets.fromLTRB(
+        Responsive.responsiveSpacing(context, mobile: AppSpacing.lg, tablet: AppSpacing.xl),
+        Responsive.responsiveSpacing(context, mobile: AppSpacing.md, tablet: AppSpacing.lg) + AppSpacing.xs,
+        Responsive.responsiveSpacing(context, mobile: AppSpacing.lg, tablet: AppSpacing.xl),
+        Responsive.responsiveSpacing(context, mobile: AppSpacing.lg, tablet: AppSpacing.xl),
+      ),
       child: SafeArea(
         bottom: false,
-        child: Column(
+        child: Stack(
           children: [
-            Text(
-              title,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
+            Column(
+              children: [
+                Text(
+                  title,
+                  style: AppTextStyles.h2.copyWith(color: Colors.white),
+                ),
+                AppSpacing.vertical(AppSpacing.xs),
+                Text(
+                  subtitle,
+                  style: AppTextStyles.bodyMedium.copyWith(
+                    color: Colors.white.withOpacity(0.85),
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
             ),
-            const SizedBox(height: 6),
-            Text(
-              subtitle,
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.85),
-                fontSize: 14,
+            if (trailing != null)
+              Positioned(
+                right: 0,
+                top: 0,
+                child: GestureDetector(
+                  onTap: onTrailingTap,
+                  child: trailing!,
+                ),
               ),
-              textAlign: TextAlign.center,
-            ),
           ],
         ),
       ),

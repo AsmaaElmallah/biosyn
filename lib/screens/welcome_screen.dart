@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:biosyn_report_flutter/widgets/logo_widget.dart';
 import 'package:biosyn_report_flutter/theme/colors.dart';
+import 'package:biosyn_report_flutter/utils/responsive.dart';
 
 class WelcomeScreen extends StatelessWidget {
   final Function(String) onSelectRole;
@@ -18,23 +19,27 @@ class WelcomeScreen extends StatelessWidget {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Color(0xFF0077B6),
-              Color(0xFF00A8E8),
-              Color(0xFF00B4D8),
+              AppColors.primaryBlue,
+              AppColors.primaryDark,
+              AppColors.primaryCyan,
             ],
           ),
         ),
         child: SafeArea(
           child: Center(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+              padding: Responsive.responsivePadding(context),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   // Main card - NO shadow
                   Container(
                     width: double.infinity,
-                    constraints: const BoxConstraints(maxWidth: 380),
+                    constraints: BoxConstraints(
+                      maxWidth: Responsive.isMobile(context) 
+                          ? double.infinity 
+                          : Responsive.maxContentWidth(context),
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(24),
@@ -44,7 +49,7 @@ class WelcomeScreen extends StatelessWidget {
                     child: Column(
                       children: [
                         // Logo inside card
-                        const LogoWidget(size: 120),
+                        const LogoWidget(size: 200),
                         const SizedBox(height: 40),
                         // Welcome text
                         const Text(

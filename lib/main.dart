@@ -20,6 +20,7 @@ import 'package:biosyn_report_flutter/services/connectivity_service.dart';
 import 'package:biosyn_report_flutter/services/sync_service.dart';
 import 'package:biosyn_report_flutter/services/auth_service.dart';
 import 'package:biosyn_report_flutter/services/supabase_service.dart';
+import 'package:biosyn_report_flutter/services/notification_service.dart';
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -45,6 +46,9 @@ void main() async {
     debugPrint('⚠️ Supabase not configured - running in offline mode');
   }
   
+  // Initialize Notification Service
+  await NotificationService.initialize();
+  
   runApp(const MyApp());
 }
 
@@ -64,7 +68,13 @@ class MyApp extends StatelessWidget {
         return Directionality(
           textDirection: TextDirection.ltr,
           child: MediaQuery(
-            data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
+            data: MediaQuery.of(context).copyWith(
+              // Ensure text scaling for accessibility (iOS and Android)
+              textScaler: MediaQuery.of(context).textScaler.clamp(
+                minScaleFactor: 0.8,
+                maxScaleFactor: 1.2,
+              ),
+            ),
             child: child!,
           ),
         );
@@ -653,6 +663,7 @@ class _AppNavigatorState extends State<AppNavigator> {
       case 'gm-dashboard':
         return GMDashboardScreen(
           allReports: _reports,
+          gmId: _userId,
           onExport: () async {
             try {
               await ExportUtils.exportAllReportsToText(_reports);

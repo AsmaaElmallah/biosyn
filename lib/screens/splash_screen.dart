@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:biosyn_report_flutter/widgets/logo_widget.dart';
+import 'package:biosyn_report_flutter/theme/colors.dart';
+import 'package:biosyn_report_flutter/utils/responsive.dart';
 
 class SplashScreen extends StatefulWidget {
   final VoidCallback onComplete;
@@ -49,9 +51,9 @@ class _SplashScreenState extends State<SplashScreen>
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Color(0xFF0077B6),
-              Color(0xFF00A8E8),
-              Color(0xFF00B4D8),
+              AppColors.primaryBlue,
+              AppColors.primaryDark,
+              AppColors.primaryCyan,
             ],
           ),
         ),
@@ -62,15 +64,15 @@ class _SplashScreenState extends State<SplashScreen>
               children: [
                 // Logo container - simple white box, NO shadow
                 Container(
-                  width: 200,
-                  height: 200,
+                  width: Responsive.responsiveWidth(context, Responsive.isMobile(context) ? 60 : 35),
+                  height: Responsive.responsiveWidth(context, Responsive.isMobile(context) ? 60 : 35),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(24),
                     // NO shadow - removed
                   ),
-                  padding: const EdgeInsets.all(32),
-                  child: const LogoWidget(size: 140),
+                  padding: const EdgeInsets.all(40),
+                  child: const LogoWidget(size: 180),
                 ),
                 const SizedBox(height: 32),
                 // App name

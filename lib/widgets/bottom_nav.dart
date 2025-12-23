@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:biosyn_report_flutter/theme/colors.dart';
+import 'package:biosyn_report_flutter/utils/responsive.dart';
 
 class BottomNav extends StatelessWidget {
   final String role;
@@ -34,8 +35,10 @@ class BottomNav extends StatelessWidget {
       ),
       child: SafeArea(
         child: Container(
-          height: 60,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          height: Responsive.isMobile(context) ? 60 : 70,
+          padding: EdgeInsets.symmetric(
+            horizontal: Responsive.responsiveSpacing(context, mobile: 16, tablet: 24),
+          ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: tabs.map((tab) {

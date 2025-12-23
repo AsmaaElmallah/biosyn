@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'notification_service.dart';
 
 class SupabaseService {
   static SupabaseClient? _client;
@@ -134,6 +135,33 @@ class SupabaseService {
         final response = await client!.from('reports').insert(reportData).select();
         debugPrint('✅ Report saved successfully to Supabase');
         debugPrint('   Response: $response');
+        
+        // Get the inserted report ID
+        String? reportId;
+        String? serverCreatedAt;
+        if (response.isNotEmpty) {
+          final firstItem = response[0];
+          reportId = firstItem['id']?.toString();
+          serverCreatedAt = firstItem['created_at']?.toString();
+        }
+        
+        // Check for time/date manipulation (compare device time with server time)
+        if (serverCreatedAt != null) {
+          final isTimeManipulated = checkTimeDateManipulation(serverCreatedAt);
+          if (isTimeManipulated && reportId != null) {
+            debugPrint('⚠️ Time/Date manipulation detected for report: $reportId');
+            await sendTimeChangeNotification(
+              senderId: report.dmId,
+              senderName: report.dmName,
+              senderRole: report.coachRole ?? 'dm',
+              reportId: reportId,
+              // Keep the coaching session date in the message
+              reportDate: report.date,
+            );
+          }
+        } else {
+          debugPrint('⚠️ Could not read created_at from Supabase response, skipping time manipulation check');
+        }
       } catch (e) {
         debugPrint('❌ Supabase insert error: $e');
         debugPrint('   Report data: $reportData');
@@ -1142,6 +1170,195 @@ class SupabaseService {
         });
   }
 
+  // ==================== Notifications ====================
+
+  /// Get all General Managers
+  static Future<List<Map<String, dynamic>>> getAllGMs() async {
+    try {
+      if (!isInitialized) {
+        return [];
+      }
+      final response = await client!
+          .from('users')
+          .select()
+          .eq('role', 'gm');
+      
+      return (response as List).map((user) => user as Map<String, dynamic>).toList();
+    } catch (e) {
+      debugPrint('❌ Error getting GMs: $e');
+      return [];
+    }
+  }
+
+  /// Check if device time/date was changed by comparing local device time
+  /// with server time (e.g. `created_at` from Supabase).
+  ///
+  /// Returns true if the difference is suspicious:
+  /// - Any difference in calendar date (even 1 day)
+  /// - Or time difference more than 30 minutes
+  static bool checkTimeDateManipulation(String serverTimeIsoString) {
+    try {
+      final now = DateTime.now();
+      // Supabase timestamps are in ISO 8601 (usually UTC)
+      final serverDateTime = DateTime.tryParse(serverTimeIsoString);
+      
+      if (serverDateTime == null) {
+        return false;
+      }
+      
+      // Compare dates (ignore time for date comparison)
+      final nowOnly = DateTime(now.year, now.month, now.day);
+      final serverDateOnly = DateTime(serverDateTime.year, serverDateTime.month, serverDateTime.day);
+      
+      // Calculate the difference in days
+      final dateDifference = serverDateOnly.difference(nowOnly).inDays;
+      
+      // If report date is different from today (even 1 day), it's suspicious
+      if (dateDifference != 0) {
+        debugPrint('⚠️ Report date is ${dateDifference.abs()} day(s) ${dateDifference > 0 ? 'in the future' : 'in the past'} - time manipulation detected');
+        return true;
+      }
+      
+      // If dates are the same, check time difference (full datetime)
+      final timeDifference = serverDateTime.difference(now).abs();
+      
+      // If time difference is more than 30 minutes, it's suspicious
+      if (timeDifference.inMinutes > 30) {
+        debugPrint('⚠️ Report time is ${timeDifference.inMinutes} minutes different from current time - time manipulation detected');
+        return true;
+      }
+      
+      // If dates are the same and time difference is within 30 minutes, it's normal
+      return false;
+    } catch (e) {
+      debugPrint('❌ Error checking time/date manipulation: $e');
+      return false;
+    }
+  }
+
+  /// Send notification to General Manager about time/date change
+  static Future<void> sendTimeChangeNotification({
+    required String senderId,
+    required String senderName,
+    required String senderRole,
+    required String reportId,
+    required String reportDate,
+  }) async {
+    try {
+      if (!isInitialized) {
+        debugPrint('⚠️ Supabase not initialized, cannot send notification');
+        return;
+      }
+
+      // Get all GMs
+      final gms = await getAllGMs();
+      if (gms.isEmpty) {
+        debugPrint('⚠️ No GMs found, cannot send notification');
+        return;
+      }
+
+      // Get role label
+      String roleLabel;
+      switch (senderRole.toLowerCase()) {
+        case 'dm':
+          roleLabel = 'District Manager';
+          break;
+        case 'ft':
+          roleLabel = 'Field Trainer';
+          break;
+        case 'pm':
+          roleLabel = 'Product Manager';
+          break;
+        case 'msl':
+          roleLabel = 'Medical Science Liaison';
+          break;
+        default:
+          roleLabel = 'Coach';
+      }
+
+      // Create notification for each GM
+      // Convert senderId to UUID if it's a string
+      String? senderUuid;
+      try {
+        // Try to parse as UUID first
+        senderUuid = senderId;
+        // If senderId is not a valid UUID format, try to find it in users table
+        if (!senderId.contains('-') || senderId.length != 36) {
+          // It's not a UUID format, try to find the user
+          final users = await client!
+              .from('users')
+              .select('id')
+              .or('id.eq.$senderId,username.eq.$senderId')
+              .limit(1);
+          if (users.isNotEmpty) {
+            senderUuid = users[0]['id']?.toString();
+          }
+        }
+      } catch (e) {
+        debugPrint('⚠️ Could not convert senderId to UUID: $e');
+        senderUuid = senderId; // Fallback to original value
+      }
+
+      final notifications = gms.map((gm) {
+        final gmId = gm['id']?.toString();
+        return {
+          'recipient_id': gmId,
+          'sender_id': senderUuid ?? senderId,
+          'sender_name': senderName,
+          'sender_role': senderRole,
+          'notification_type': 'time_change',
+          'title': 'Time/Date Change Detected',
+          'message': '$senderName ($roleLabel) changed the device time/date while submitting a coaching session on $reportDate',
+          'report_id': reportId,
+          'read': false,
+        };
+      }).toList();
+
+      // Insert notifications to database (in-app notifications)
+      await client!.from('notifications').insert(notifications);
+      
+      debugPrint('✅ Sent ${notifications.length} time change notification(s) to GM(s)');
+      
+      // Send push notifications (external notifications with sound)
+      await _sendPushNotifications(
+        title: 'Time/Date Change Detected',
+        message: '$senderName ($roleLabel) changed the device time/date while submitting a coaching session on $reportDate',
+        reportId: reportId,
+      );
+    } catch (e) {
+      debugPrint('❌ Error sending time change notification: $e');
+      // Don't throw - notification failure shouldn't block report submission
+    }
+  }
+
+  /// Send push notifications to all GMs (external notifications with sound)
+  static Future<void> _sendPushNotifications({
+    required String title,
+    required String message,
+    required String reportId,
+  }) async {
+    try {
+      // Initialize NotificationService if not already initialized
+      await NotificationService.initialize();
+      
+      // Generate a unique ID based on reportId hash
+      final notificationId = reportId.hashCode.abs() % 2147483647; // Max int32
+      
+      // Show push notification with sound
+      await NotificationService.showNotification(
+        id: notificationId,
+        title: title,
+        body: message,
+        payload: reportId,
+      );
+      
+      debugPrint('✅ Push notification sent for report: $reportId');
+    } catch (e) {
+      debugPrint('⚠️ Error sending push notification: $e');
+      // Don't throw - push notification failure shouldn't block report submission
+    }
+  }
+
   /// Listen to plans changes (real-time)
   static Stream<List<Map<String, dynamic>>> watchPlans(String dmId) {
     if (!isInitialized) {
@@ -1153,6 +1370,226 @@ class SupabaseService {
         .eq('dm_id', dmId)
         .order('date', ascending: true)
         .map((data) => (data as List).cast<Map<String, dynamic>>());
+  }
+
+  // ==================== Notifications ====================
+
+  /// Get notifications for a GM
+  static Future<List<Map<String, dynamic>>> getNotifications(String gmId) async {
+    try {
+      if (!isInitialized) {
+        debugPrint('⚠️ Supabase not initialized, cannot get notifications');
+        return [];
+      }
+      
+      debugPrint('🔍 Getting notifications for GM ID: $gmId');
+      
+      // Convert gmId to UUID if needed
+      String? gmUuid = gmId;
+      if (!gmId.contains('-') || gmId.length != 36) {
+        debugPrint('   GM ID is not UUID format, trying to find UUID...');
+        // Try to find user by username or id
+        try {
+          final users = await client!
+              .from('users')
+              .select('id')
+              .or('id.eq.$gmId,username.eq.$gmId')
+              .limit(1);
+          if (users.isNotEmpty) {
+            gmUuid = users[0]['id']?.toString();
+            debugPrint('   ✅ Found GM UUID: $gmUuid');
+          } else {
+            debugPrint('   ⚠️ No user found with ID/username: $gmId');
+          }
+        } catch (e) {
+          debugPrint('   ❌ Error finding GM UUID: $e');
+        }
+      } else {
+        debugPrint('   ✅ GM ID is already UUID format');
+      }
+      
+      final searchId = gmUuid ?? gmId;
+      debugPrint('   🔍 Searching notifications with recipient_id: $searchId');
+      
+      // Select all fields including title, message, sender_name, sender_role, etc.
+      final response = await client!
+          .from('notifications')
+          .select('id, recipient_id, sender_id, sender_name, sender_role, notification_type, title, message, report_id, read, created_at, updated_at')
+          .eq('recipient_id', searchId)
+          .order('created_at', ascending: false);
+      
+      final notifications = (response as List).map((n) => n as Map<String, dynamic>).toList();
+      
+      debugPrint('📬 Found ${notifications.length} notifications');
+      
+      // Debug: Print all notifications to verify data
+      if (notifications.isNotEmpty) {
+        for (var i = 0; i < notifications.length; i++) {
+          final notif = notifications[i];
+          debugPrint('   Notification $i:');
+          debugPrint('      ID: ${notif['id']}');
+          debugPrint('      Title: ${notif['title']}');
+          debugPrint('      Message: ${notif['message']}');
+          debugPrint('      Sender: ${notif['sender_name']} (${notif['sender_role']})');
+          debugPrint('      Recipient ID: ${notif['recipient_id']}');
+          debugPrint('      Read: ${notif['read']}');
+        }
+      } else {
+        debugPrint('   ⚠️ No notifications found with recipient_id: $searchId');
+        debugPrint('   🔍 Trying to find GM by role and get all GM notifications...');
+        
+        // Fallback: Try to get all GM notifications if specific GM not found
+        try {
+          // Get all GMs to find matching one
+          final gms = await getAllGMs();
+          debugPrint('   Found ${gms.length} GMs in database');
+          
+          // Try to find GM that matches the provided ID
+          Map<String, dynamic>? matchingGM;
+          for (var gm in gms) {
+            final gmIdStr = gm['id']?.toString();
+            final gmUsername = gm['username']?.toString();
+            if (gmIdStr == gmId || gmIdStr == searchId || gmUsername == gmId) {
+              matchingGM = gm;
+              debugPrint('   ✅ Found matching GM: ${gm['name']} (ID: $gmIdStr)');
+              break;
+            }
+          }
+          
+          if (matchingGM != null) {
+            final correctGmId = matchingGM['id']?.toString();
+            if (correctGmId != null) {
+              debugPrint('   🔍 Retrying with correct GM ID: $correctGmId');
+              
+              final retryResponse = await client!
+                  .from('notifications')
+                  .select('id, recipient_id, sender_id, sender_name, sender_role, notification_type, title, message, report_id, read, created_at, updated_at')
+                  .eq('recipient_id', correctGmId)
+                  .order('created_at', ascending: false);
+              
+              final retryNotifications = (retryResponse as List).map((n) => n as Map<String, dynamic>).toList();
+              debugPrint('   📬 Found ${retryNotifications.length} notifications with correct ID');
+              return retryNotifications;
+            }
+          }
+          
+          // Final fallback: try to return all notifications visible to this GM
+          debugPrint('   ⚠️ Falling back to all notifications visible to current user');
+          final allNotificationsResponse = await client!
+              .from('notifications')
+              .select('id, recipient_id, sender_id, sender_name, sender_role, notification_type, title, message, report_id, read, created_at, updated_at')
+              .order('created_at', ascending: false);
+          final allNotifications = (allNotificationsResponse as List).map((n) => n as Map<String, dynamic>).toList();
+          debugPrint('   📬 Fallback returned ${allNotifications.length} notifications');
+          return allNotifications;
+        } catch (e) {
+          debugPrint('   ❌ Error in fallback: $e');
+        }
+      }
+      
+      return notifications;
+    } catch (e) {
+      debugPrint('❌ Error getting notifications: $e');
+      debugPrint('   Stack trace: ${StackTrace.current}');
+      return [];
+    }
+  }
+
+  /// Mark notification as read
+  static Future<void> markNotificationAsRead(String notificationId) async {
+    try {
+      if (!isInitialized) {
+        throw Exception('Supabase not initialized');
+      }
+      
+      await client!
+          .from('notifications')
+          .update({'read': true})
+          .eq('id', notificationId);
+      
+      debugPrint('✅ Notification marked as read: $notificationId');
+    } catch (e) {
+      debugPrint('❌ Error marking notification as read: $e');
+      rethrow;
+    }
+  }
+
+  /// Mark all notifications as read for a GM
+  static Future<void> markAllNotificationsAsRead(String gmId) async {
+    try {
+      if (!isInitialized) {
+        throw Exception('Supabase not initialized');
+      }
+      
+      // Convert gmId to UUID if needed
+      String? gmUuid = gmId;
+      if (!gmId.contains('-') || gmId.length != 36) {
+        // Try to find user by username or id
+        try {
+          final users = await client!
+              .from('users')
+              .select('id')
+              .or('id.eq.$gmId,username.eq.$gmId')
+              .limit(1);
+          if (users.isNotEmpty) {
+            gmUuid = users[0]['id']?.toString();
+          }
+        } catch (e) {
+          debugPrint('⚠️ Could not find GM UUID: $e');
+        }
+      }
+      
+      await client!
+          .from('notifications')
+          .update({'read': true})
+          .eq('recipient_id', gmUuid ?? gmId)
+          .eq('read', false);
+      
+      debugPrint('✅ All notifications marked as read for GM: $gmId');
+    } catch (e) {
+      debugPrint('❌ Error marking all notifications as read: $e');
+      rethrow;
+    }
+  }
+
+  /// Get unread notifications count for a GM
+  static Future<int> getUnreadNotificationsCount(String gmId) async {
+    try {
+      if (!isInitialized) {
+        return 0;
+      }
+      
+      // Convert gmId to UUID if needed
+      String? gmUuid = gmId;
+      if (!gmId.contains('-') || gmId.length != 36) {
+        // Try to find user by username or id
+        try {
+          final users = await client!
+              .from('users')
+              .select('id')
+              .or('id.eq.$gmId,username.eq.$gmId')
+              .limit(1);
+          if (users.isNotEmpty) {
+            gmUuid = users[0]['id']?.toString();
+          }
+        } catch (e) {
+          debugPrint('⚠️ Could not find GM UUID: $e');
+        }
+      }
+      
+      final response = await client!
+          .from('notifications')
+          .select('id')
+          .eq('recipient_id', gmUuid ?? gmId)
+          .eq('read', false);
+      
+      // Get count from response
+      final count = (response as List).length;
+      return count;
+    } catch (e) {
+      debugPrint('❌ Error getting unread notifications count: $e');
+      return 0;
+    }
   }
 }
 

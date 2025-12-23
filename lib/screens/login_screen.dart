@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:biosyn_report_flutter/widgets/logo_widget.dart';
 import 'package:biosyn_report_flutter/theme/colors.dart';
 import 'package:biosyn_report_flutter/services/supabase_service.dart';
+import 'package:biosyn_report_flutter/utils/responsive.dart';
 
 class LoginScreen extends StatefulWidget {
   final String role;
@@ -120,15 +121,19 @@ class _LoginScreenState extends State<LoginScreen> {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [AppColors.primaryBlue, Color(0xFF0080BD), AppColors.primaryCyan],
+            colors: [AppColors.primaryBlue, AppColors.primaryDark, AppColors.primaryCyan],
           ),
         ),
         child: SafeArea(
           child: Center(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
+              padding: Responsive.responsivePadding(context),
               child: Container(
-                constraints: const BoxConstraints(maxWidth: 400),
+                constraints: BoxConstraints(
+                  maxWidth: Responsive.isMobile(context) 
+                      ? double.infinity 
+                      : Responsive.maxContentWidth(context),
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(24),
@@ -170,7 +175,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                     // Logo
-                    const LogoWidget(size: 96, showText: true),
+                    const LogoWidget(size: 200, showText: true),
                     const SizedBox(height: 24),
                     // Title
                     Text(

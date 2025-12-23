@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:biosyn_report_flutter/theme/colors.dart';
+import 'package:biosyn_report_flutter/theme/text_styles.dart';
+import 'package:biosyn_report_flutter/theme/spacing.dart';
 import 'package:biosyn_report_flutter/widgets/bottom_nav.dart';
 import 'package:biosyn_report_flutter/widgets/app_header.dart';
+import 'package:biosyn_report_flutter/widgets/app_card.dart';
 import 'package:biosyn_report_flutter/widgets/sync_status_indicator.dart';
 import 'package:biosyn_report_flutter/models/coaching_report.dart';
 import 'package:biosyn_report_flutter/services/supabase_service.dart';
@@ -614,13 +617,13 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                   child: RefreshIndicator(
                     onRefresh: widget.onRefresh ?? () async {},
                     child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(24),
+                      padding: AppSpacing.screenPadding,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           // Sync Status Indicator
                           const SyncStatusIndicator(),
-                          const SizedBox(height: 16),
+                          AppSpacing.vertical(AppSpacing.lg),
                           // Stats Cards
                           Row(
                             children: [
@@ -1429,19 +1432,8 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
   }
 
   Widget _buildStatCard(String title, String value, String subtitle, IconData icon, Color color) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
+    return AppCard(
+      padding: AppSpacing.cardPadding,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1449,7 +1441,7 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: AppSpacing.paddingSM,
                 decoration: BoxDecoration(
                   color: color.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
@@ -1458,25 +1450,17 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          AppSpacing.vertical(AppSpacing.md),
           Text(
             value,
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: color,
-            ),
+            style: AppTextStyles.h2.copyWith(color: color),
           ),
-          const SizedBox(height: 4),
+          AppSpacing.vertical(AppSpacing.xs),
           Text(
             title,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: AppColors.gray700,
-            ),
+            style: AppTextStyles.labelLarge,
           ),
-          const SizedBox(height: 2),
+          AppSpacing.vertical(AppSpacing.xs / 2),
           Text(
             subtitle,
             style: const TextStyle(

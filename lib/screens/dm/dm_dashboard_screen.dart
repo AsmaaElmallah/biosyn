@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:biosyn_report_flutter/theme/colors.dart';
+import 'package:biosyn_report_flutter/theme/text_styles.dart';
+import 'package:biosyn_report_flutter/theme/spacing.dart';
 import 'package:biosyn_report_flutter/widgets/bottom_nav.dart';
 import 'package:biosyn_report_flutter/widgets/app_header.dart';
+import 'package:biosyn_report_flutter/widgets/app_card.dart';
 import 'package:biosyn_report_flutter/widgets/sync_status_indicator.dart';
 import 'package:biosyn_report_flutter/models/coaching_report.dart';
 import 'package:biosyn_report_flutter/utils/export_utils.dart';
 import 'package:biosyn_report_flutter/services/supabase_service.dart';
+import 'package:biosyn_report_flutter/utils/responsive.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -374,14 +378,14 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
             Expanded(
               child: RefreshIndicator(
                 onRefresh: widget.onRefresh ?? () async {},
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(24),
+                  child: SingleChildScrollView(
+                  padding: Responsive.responsivePadding(context),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     // Sync Status Indicator
                     const SyncStatusIndicator(),
-                    const SizedBox(height: 16),
+                    AppSpacing.vertical(AppSpacing.lg),
                   // Stats Cards
                   Row(
                     children: [
@@ -406,7 +410,7 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
+                  AppSpacing.vertical(AppSpacing.md),
                   Row(
                     children: [
                       Expanded(
@@ -430,7 +434,7 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 24),
+                  AppSpacing.vertical(AppSpacing.xl),
                   // Monthly Visits Chart
                   _buildCard(
                     child: Column(
@@ -545,87 +549,122 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                         const SizedBox(height: 16),
                         SizedBox(
                           height: 250,
-                          child: BarChart(
-                            BarChartData(
-                              gridData: FlGridData(
-                                show: true,
-                                drawVerticalLine: false,
-                                getDrawingHorizontalLine: (value) {
-                                  return FlLine(
-                                    color: AppColors.gray200,
-                                    strokeWidth: 1,
-                                    dashArray: [3, 3],
-                                  );
-                                },
-                              ),
-                              titlesData: FlTitlesData(
-                                leftTitles: AxisTitles(
-                                  sideTitles: SideTitles(
-                                    showTitles: true,
-                                    reservedSize: 40,
-                                    getTitlesWidget: (value, meta) {
-                                      return Text(
-                                        value.toInt().toString(),
-                                        style: const TextStyle(
-                                          color: AppColors.gray600,
-                                          fontSize: 12,
-                                        ),
-                                      );
-                                    },
+                          child: mrPerformance.isEmpty
+                              ? const Center(
+                                  child: Text(
+                                    'No performance data available',
+                                    style: TextStyle(color: AppColors.gray600),
                                   ),
-                                ),
-                                bottomTitles: AxisTitles(
-                                  sideTitles: SideTitles(
-                                    showTitles: true,
-                                    reservedSize: 70,
-                                    getTitlesWidget: (value, meta) {
-                                      if (value.toInt() >= 0 && value.toInt() < mrPerformance.length) {
-                                        return Padding(
-                                          padding: const EdgeInsets.only(top: 8),
-                                          child: RotatedBox(
-                                            quarterTurns: 0,
-                                            child: Text(
-                                              mrPerformance[value.toInt()]['name'],
-                                              style: const TextStyle(
-                                                color: AppColors.gray600,
-                                                fontSize: 10,
-                                              ),
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                              textAlign: TextAlign.center,
+                                )
+                              : SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
+                                  child: SizedBox(
+                                    // مساحة أفقية كافية لكل MR مع سكرول لو العدد كبير
+                                    width: (mrPerformance.length * 90.0)
+                                        .clamp(300.0, double.infinity),
+                                    child: BarChart(
+                                      BarChartData(
+                                        alignment: BarChartAlignment.spaceAround,
+                                        gridData: FlGridData(
+                                          show: true,
+                                          drawVerticalLine: false,
+                                          getDrawingHorizontalLine: (value) {
+                                            return FlLine(
+                                              color: AppColors.gray200,
+                                              strokeWidth: 1,
+                                              dashArray: [3, 3],
+                                            );
+                                          },
+                                        ),
+                                        titlesData: FlTitlesData(
+                                          leftTitles: AxisTitles(
+                                            sideTitles: SideTitles(
+                                              showTitles: true,
+                                              reservedSize: 40,
+                                              getTitlesWidget: (value, meta) {
+                                                return Text(
+                                                  value.toInt().toString(),
+                                                  style: const TextStyle(
+                                                    color: AppColors.gray600,
+                                                    fontSize: 12,
+                                                  ),
+                                                );
+                                              },
                                             ),
                                           ),
-                                        );
-                                      }
-                                      return const Text('');
-                                    },
-                                  ),
-                                ),
-                                rightTitles: const AxisTitles(
-                                  sideTitles: SideTitles(showTitles: false),
-                                ),
-                                topTitles: const AxisTitles(
-                                  sideTitles: SideTitles(showTitles: false),
-                                ),
-                              ),
-                              borderData: FlBorderData(show: false),
-                              barGroups: mrPerformance.asMap().entries.map((entry) {
-                                return BarChartGroupData(
-                                  x: entry.key,
-                                  barRods: [
-                                    BarChartRodData(
-                                      toY: entry.value['avgScore'] as double,
-                                      color: AppColors.primaryCyan,
-                                      width: 20,
-                                      borderRadius: const BorderRadius.vertical(
-                                        top: Radius.circular(8),
+                                          bottomTitles: AxisTitles(
+                                            sideTitles: SideTitles(
+                                              showTitles: true,
+                                              reservedSize: 80,
+                                              getTitlesWidget: (value, meta) {
+                                                if (value.toInt() >= 0 &&
+                                                    value.toInt() <
+                                                        mrPerformance.length) {
+                                                  final name =
+                                                      mrPerformance[value.toInt()]
+                                                          ['name'] as String? ??
+                                                              '';
+                                                  return Padding(
+                                                    padding:
+                                                        const EdgeInsets.only(
+                                                            top: 8),
+                                                    child: SizedBox(
+                                                      width: 70,
+                                                      child: Text(
+                                                        name,
+                                                        style: const TextStyle(
+                                                          color:
+                                                              AppColors.gray600,
+                                                          fontSize: 9,
+                                                        ),
+                                                        maxLines: 2,
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                        textAlign:
+                                                            TextAlign.center,
+                                                      ),
+                                                    ),
+                                                  );
+                                                }
+                                                return const Text('');
+                                              },
+                                            ),
+                                          ),
+                                          rightTitles: const AxisTitles(
+                                            sideTitles:
+                                                SideTitles(showTitles: false),
+                                          ),
+                                          topTitles: const AxisTitles(
+                                            sideTitles:
+                                                SideTitles(showTitles: false),
+                                          ),
+                                        ),
+                                        borderData:
+                                            FlBorderData(show: false),
+                                        barGroups: mrPerformance
+                                            .asMap()
+                                            .entries
+                                            .map((entry) {
+                                          return BarChartGroupData(
+                                            x: entry.key,
+                                            barRods: [
+                                              BarChartRodData(
+                                                toY: entry.value['avgScore']
+                                                    as double,
+                                                color: AppColors.primaryCyan,
+                                                width: 20,
+                                                borderRadius:
+                                                    const BorderRadius.vertical(
+                                                  top: Radius.circular(8),
+                                                ),
+                                              ),
+                                            ],
+                                          );
+                                        }).toList(),
                                       ),
                                     ),
-                                  ],
-                                );
-                              }).toList(),
-                            ),
-                          ),
+                                  ),
+                                ),
                         ),
                       ],
                     ),
@@ -1192,7 +1231,7 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                       ],
                     ),
                   ),
-                  const SizedBox(height: 24),
+                  AppSpacing.vertical(AppSpacing.xl),
                   // Recent Reports
                   _buildCard(
                     child: Column(
@@ -2190,19 +2229,8 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
     IconData icon,
     Color color,
   ) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
+    return AppCard(
+      padding: AppSpacing.cardPadding,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2220,30 +2248,20 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
               const Spacer(),
             ],
           ),
-          const SizedBox(height: 12),
+          AppSpacing.vertical(AppSpacing.md),
           Text(
             title,
-            style: const TextStyle(
-              color: AppColors.gray600,
-              fontSize: 12,
-            ),
+            style: AppTextStyles.bodySmall,
           ),
-          const SizedBox(height: 4),
+          AppSpacing.vertical(AppSpacing.xs),
           Text(
             value,
-            style: TextStyle(
-              color: color,
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-            ),
+            style: AppTextStyles.h2.copyWith(color: color),
           ),
-          const SizedBox(height: 4),
+          AppSpacing.vertical(AppSpacing.xs),
           Text(
             subtitle,
-            style: const TextStyle(
-              color: AppColors.gray600,
-              fontSize: 10,
-            ),
+            style: AppTextStyles.caption,
           ),
         ],
       ),
@@ -2251,19 +2269,8 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
   }
 
   Widget _buildCard({required Widget child}) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
+    return AppCard(
+      padding: AppSpacing.paddingXL,
       child: child,
     );
   }

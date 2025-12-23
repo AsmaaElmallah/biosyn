@@ -51,5 +51,9 @@
 	<string>This app needs access to your location to record the brick location for coaching sessions.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>This app needs access to your location to record the brick location for coaching sessions.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 </dict>
 </plist>
