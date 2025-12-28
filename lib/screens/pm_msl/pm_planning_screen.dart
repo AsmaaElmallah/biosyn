@@ -55,21 +55,25 @@ class _PMPlanningScreenState extends State<PMPlanningScreen> {
   // Helper to safely get selected DM name
   String _getSelectedDMName() {
     if (_selectedDM == null || _districtManagers.isEmpty) return 'DM';
+    if (_selectedDM == 'no_dm') return 'No District Manager';
     final dm = _districtManagers.firstWhere(
       (d) => d['id'] == _selectedDM,
       orElse: () => {'id': '', 'name': 'District Manager'},
     );
-    return dm['name'] ?? 'District Manager';
+    final name = dm['name'] ?? 'District Manager';
+    return name.isNotEmpty ? name : 'District Manager';
   }
 
   // Helper to safely get selected MR name
   String _getSelectedMRName() {
     if (_selectedMR == null || _medicalReps.isEmpty) return 'MR';
+    if (_selectedMR == 'no_mr') return 'No Medical Rep';
     final mr = _medicalReps.firstWhere(
       (m) => m['id'] == _selectedMR,
       orElse: () => {'id': '', 'name': 'Medical Rep'},
     );
-    return mr['name'] ?? 'Medical Rep';
+    final name = mr['name'] ?? 'Medical Rep';
+    return name.isNotEmpty ? name : 'Medical Rep';
   }
 
   @override
@@ -108,12 +112,17 @@ class _PMPlanningScreenState extends State<PMPlanningScreen> {
       // Fetch only District Managers (role = 'dm'), not Field Trainers
       final dms = await SupabaseService.getAllDMs();
       setState(() {
-        _districtManagers = dms
-            .map((u) => {
-                  'id': (u['id'] ?? '').toString(),
-                  'name': (u['name'] ?? '').toString(),
-                })
-            .toList();
+        _districtManagers = [
+          // Add "No District Manager" option at the beginning
+          {'id': 'no_dm', 'name': 'No District Manager'},
+          ...dms
+              .map((u) => {
+                    'id': (u['id'] ?? '').toString(),
+                    'name': (u['name'] ?? '').toString().trim(),
+                  })
+              .where((dm) => dm['id']!.isNotEmpty && dm['name']!.isNotEmpty) // Filter out empty names
+              .toList(),
+        ];
       });
     } catch (e) {
       setState(() {
@@ -137,12 +146,17 @@ class _PMPlanningScreenState extends State<PMPlanningScreen> {
     try {
       final mrs = await SupabaseService.getAllMRs();
       setState(() {
-        _medicalReps = mrs
-            .map((u) => {
-                  'id': (u['id'] ?? '').toString(),
-                  'name': (u['name'] ?? '').toString(),
-                })
-            .toList();
+        _medicalReps = [
+          // Add "No Medical Rep" option at the beginning
+          {'id': 'no_mr', 'name': 'No Medical Rep'},
+          ...mrs
+              .map((u) => {
+                    'id': (u['id'] ?? '').toString(),
+                    'name': (u['name'] ?? '').toString().trim(),
+                  })
+              .where((mr) => mr['id']!.isNotEmpty && mr['name']!.isNotEmpty) // Filter out empty names
+              .toList(),
+        ];
       });
     } catch (e) {
       setState(() {
@@ -187,15 +201,26 @@ class _PMPlanningScreenState extends State<PMPlanningScreen> {
   Future<void> _handleStartCoaching() async {
     if (_selectedDM == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a District Manager')),
+        const SnackBar(content: Text('Please select a District Manager or "No District Manager"')),
       );
       return;
     }
     if (_selectedMR == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a Medical Representative')),
+        const SnackBar(content: Text('Please select a Medical Representative or "No Medical Rep"')),
       );
       return;
+    }
+    
+    // Check if both are "No" - this means Single visit
+    if (_selectedDM == 'no_dm' && _selectedMR == 'no_mr') {
+      // Single visit - proceed without DM or MR
+    } else if (_selectedDM == 'no_dm' && _selectedMR != 'no_mr') {
+      // Double with MR only - valid
+    } else if (_selectedDM != 'no_dm' && _selectedMR == 'no_mr') {
+      // Double with DM only - valid
+    } else {
+      // Triple - both DM and MR selected - valid
     }
 
     // Check if plan exists for today
@@ -211,15 +236,15 @@ class _PMPlanningScreenState extends State<PMPlanningScreen> {
           coachId: _coachId,
           coachName: _coachName,
           coachRole: widget.coachRole,
-          dmId: _selectedDM!,
-          dmName: _getSelectedDMName(),
-          mrId: _selectedMR!,
-          mrName: _getSelectedMRName(),
+          dmId: _selectedDM == 'no_dm' ? null : _selectedDM!,
+          dmName: _selectedDM == 'no_dm' ? null : _getSelectedDMName(),
+          mrId: _selectedMR == 'no_mr' ? null : _selectedMR!,
+          mrName: _selectedMR == 'no_mr' ? null : _getSelectedMRName(),
           isQuickSession: isQuickSession,
           onSubmit: (report) async {
             await widget.onReportSubmit(report);
             // Don't pop here - let the form handle navigation after all reports are submitted
-            // This is especially important for Triple Visit which submits 2 reports
+            // This is especially important for Triple Visit which submits 1 report with both DM and MR questions
           },
           onBack: () => Navigator.pop(context),
         ),
@@ -717,7 +742,10 @@ class _PMPlanningScreenState extends State<PMPlanningScreen> {
                                               ),
                                               child: Center(
                                                 child: Text(
-                                                  (dm['name'] ?? 'D')[0].toUpperCase(),
+                                                  () {
+                                                    final name = dm['name']?.toString() ?? '';
+                                                    return name.isNotEmpty ? name[0].toUpperCase() : 'D';
+                                                  }(),
                                                   style: const TextStyle(
                                                     color: AppColors.primaryBlue,
                                                     fontWeight: FontWeight.bold,
@@ -824,7 +852,10 @@ class _PMPlanningScreenState extends State<PMPlanningScreen> {
                                               ),
                                               child: Center(
                                                 child: Text(
-                                                  (mr['name'] ?? 'M')[0].toUpperCase(),
+                                                  () {
+                                                    final name = mr['name']?.toString() ?? '';
+                                                    return name.isNotEmpty ? name[0].toUpperCase() : 'M';
+                                                  }(),
                                                   style: const TextStyle(
                                                     color: AppColors.primaryBlue,
                                                     fontWeight: FontWeight.bold,
@@ -887,7 +918,10 @@ class _PMPlanningScreenState extends State<PMPlanningScreen> {
                                           ),
                                           child: Center(
                                             child: Text(
-                                              _getSelectedDMName()[0].toUpperCase(),
+                                              () {
+                                                final name = _getSelectedDMName();
+                                                return name.isNotEmpty ? name[0].toUpperCase() : 'D';
+                                              }(),
                                               style: const TextStyle(
                                                 color: AppColors.primaryBlue,
                                                 fontSize: 20,
@@ -937,7 +971,10 @@ class _PMPlanningScreenState extends State<PMPlanningScreen> {
                                           ),
                                           child: Center(
                                             child: Text(
-                                              _getSelectedMRName()[0].toUpperCase(),
+                                              () {
+                                                final name = _getSelectedMRName();
+                                                return name.isNotEmpty ? name[0].toUpperCase() : 'M';
+                                              }(),
                                               style: const TextStyle(
                                                 color: AppColors.primaryBlue,
                                                 fontSize: 20,

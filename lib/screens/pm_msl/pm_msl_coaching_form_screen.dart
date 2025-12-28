@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:biosyn_report_flutter/theme/colors.dart';
 import 'package:biosyn_report_flutter/models/coaching_report.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:biosyn_report_flutter/utils/error_handler.dart';
 
 class PMMSLCoachingFormScreen extends StatefulWidget {
   final String date;
@@ -37,42 +37,9 @@ class PMMSLCoachingFormScreen extends StatefulWidget {
 }
 
 class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
-  int _currentSection = 0;
   final Map<String, String?> _formData = {};
   final _formKey = GlobalKey<FormState>();
-
-  // Get sections dynamically based on Type of Visit
-  List<Map<String, String>> get _sections {
-    final typeOfVisit = _formData['typeOfVisit'];
-    final baseSections = [
-      {'title': 'Basic Information', 'key': 'basic'},
-    ];
-    
-    if (typeOfVisit == 'Double') {
-      // Double: Skip DM Feedback, show only MR Feedback
-      return [
-        ...baseSections,
-        {'title': 'MR Feedback', 'key': 'mrFeedback'},
-        {'title': 'Comments & Insights', 'key': 'comments'},
-      ];
-    } else if (typeOfVisit == 'Triple') {
-      // Triple: Show both DM and MR Feedback
-      return [
-        ...baseSections,
-        {'title': 'DM Feedback', 'key': 'dmFeedback'},
-        {'title': 'MR Feedback', 'key': 'mrFeedback'},
-        {'title': 'Comments & Insights', 'key': 'comments'},
-      ];
-    } else {
-      // Single: Default - show all sections
-      return [
-        ...baseSections,
-        {'title': 'DM Feedback', 'key': 'dmFeedback'},
-        {'title': 'MR Feedback', 'key': 'mrFeedback'},
-        {'title': 'Comments & Insights', 'key': 'comments'},
-      ];
-    }
-  }
+  bool _isSubmitting = false; // Loading state for submit button
 
   // Controllers
   late final TextEditingController _areaBrickNameController;
@@ -83,11 +50,6 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
 
   // Dropdown data - no longer needed, DM and MR are passed from previous screen
 
-  // Location
-  Position? _currentPosition;
-  bool _locationLoading = false;
-  String? _locationName;
-  String? _googleMapsUrl;
 
   @override
   void initState() {
@@ -124,364 +86,106 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
     super.dispose();
   }
 
-
-  Future<void> _getCurrentLocation() async {
-    setState(() => _locationLoading = true);
-    try {
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Location services are disabled')),
-          );
-        }
-        setState(() => _locationLoading = false);
-        return;
-      }
-
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Location permissions are denied')),
-            );
-          }
-          setState(() => _locationLoading = false);
-          return;
-        }
-      }
-
-      if (permission == LocationPermission.deniedForever) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Location permissions are permanently denied')),
-          );
-        }
-        setState(() => _locationLoading = false);
-        return;
-      }
-
-      Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
-
-      // Get location name - will be filled from Google Maps when user confirms
-      // For now, use coordinates as placeholder
-      String? locationName = 'Location at ${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}';
-      
-      // Note: Reverse geocoding can be added later using Google Geocoding API
-      // For now, user will see the location on Google Maps and can confirm
-
-      // Generate Google Maps URL
-      final googleMapsUrl = 'https://www.google.com/maps?q=${position.latitude},${position.longitude}';
-
-      setState(() {
-        _currentPosition = position;
-        _formData['brickLocationLat'] = position.latitude.toString();
-        _formData['brickLocationLng'] = position.longitude.toString();
-        _locationName = locationName;
-        _googleMapsUrl = googleMapsUrl;
-        _formData['locationName'] = locationName;
-        _formData['googleMapsUrl'] = googleMapsUrl;
-        _locationLoading = false;
-      });
-
-      // Show preview dialog
-      if (mounted) {
-        _showLocationPreviewDialog(position, locationName, googleMapsUrl);
-      }
-    } catch (e) {
-      setState(() => _locationLoading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to get location: $e')),
-        );
-      }
-    }
-  }
-
-  Future<void> _showLocationPreviewDialog(Position position, String? locationName, String googleMapsUrl) async {
-    final locationNameController = TextEditingController(text: locationName ?? '');
-    
-    final confirmed = await showDialog<Map<String, String?>>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  gradient: AppColors.primaryGradient,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(Icons.location_on, color: Colors.white, size: 24),
-              ),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Text(
-                  'Location Preview',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Coordinates Display
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppColors.primaryCyan.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.primaryCyan.withOpacity(0.3)),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.gps_fixed, color: AppColors.primaryCyan, size: 20),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          '${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.gray700,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-                // Location Name Input
-                TextField(
-                  controller: locationNameController,
-                  decoration: InputDecoration(
-                    labelText: 'Location Name (from Google Maps)',
-                    hintText: 'Enter location name as shown on Google Maps...',
-                    prefixIcon: const Icon(Icons.place, color: AppColors.primaryCyan),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: AppColors.gray200, width: 2),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: AppColors.gray200, width: 2),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: AppColors.primaryCyan, width: 2),
-                    ),
-                    filled: true,
-                    fillColor: Colors.white,
-                  ),
-                  maxLines: 2,
-                ),
-                const SizedBox(height: 16),
-                // Google Maps Button
-                Container(
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    gradient: AppColors.primaryGradientHorizontal,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.primaryBlue.withOpacity(0.3),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: () async {
-                        final uri = Uri.parse(googleMapsUrl);
-                        if (await canLaunchUrl(uri)) {
-                          await launchUrl(uri, mode: LaunchMode.externalApplication);
-                        }
-                      },
-                      borderRadius: BorderRadius.circular(12),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.map, color: Colors.white, size: 22),
-                            const SizedBox(width: 8),
-                            const Text(
-                              'Open in Google Maps',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  '💡 Tip: Open Google Maps to see the location name, then enter it above',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: AppColors.gray600,
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, null),
-              style: TextButton.styleFrom(
-                foregroundColor: AppColors.gray600,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              ),
-              child: const Text('Cancel'),
-            ),
-            Container(
-              decoration: BoxDecoration(
-                gradient: AppColors.primaryGradientHorizontal,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppColors.primaryCyan.withOpacity(0.3),
-                    blurRadius: 8,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: () {
-                    Navigator.pop(context, {
-                      'locationName': locationNameController.text.trim(),
-                      'confirmed': 'true',
-                    });
-                  },
-                  borderRadius: BorderRadius.circular(12),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                    child: const Text(
-                      'Confirm Location',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (confirmed != null && confirmed['confirmed'] == 'true') {
-      // User confirmed, update location name
-      final newLocationName = confirmed['locationName'] ?? locationName;
-      setState(() {
-        _locationName = newLocationName;
-        _formData['locationName'] = newLocationName;
-      });
-    } else {
-      // User cancelled, clear location
-      setState(() {
-        _currentPosition = null;
-        _locationName = null;
-        _googleMapsUrl = null;
-        _formData.remove('brickLocationLat');
-        _formData.remove('brickLocationLng');
-        _formData.remove('locationName');
-        _formData.remove('googleMapsUrl');
-      });
-    }
-  }
-
   void _updateField(String field, String value) {
     setState(() {
       _formData[field] = value;
     });
   }
 
-  bool _validateSection() {
-    // Ensure current section is within bounds
-    if (_currentSection >= _sections.length) {
-      return false;
+  /// Determine visit type automatically based on DM and MR selection
+  String _determineVisitType() {
+    final hasDM = widget.dmId != null && widget.dmId!.isNotEmpty;
+    final hasMR = widget.mrId != null && widget.mrId!.isNotEmpty;
+    
+    if (!hasDM && !hasMR) {
+      return 'Single'; // No DM, No MR = Single
+    } else if (!hasDM && hasMR) {
+      return 'Double'; // No DM, Has MR = Double with MR only
+    } else if (hasDM && !hasMR) {
+      return 'Double'; // Has DM, No MR = Double with DM only
+    } else {
+      return 'Triple'; // Has DM, Has MR = Triple
     }
-    
-    final typeOfVisit = _formData['typeOfVisit'];
-    final sectionKey = _sections[_currentSection]['key'];
-    
-    // Define required fields based on section key
+  }
+
+  bool _validateAllFields() {
+    final typeOfVisit = _determineVisitType();
     List<String> requiredFields = [];
     
-    switch (sectionKey) {
-      case 'basic':
-        requiredFields = ['dmId', 'mrId', 'areaBrickName', 'typeOfVisit'];
-        break;
-      case 'dmFeedback':
-        // Only required for Triple
-        if (typeOfVisit == 'Triple') {
-          requiredFields = ['customerAwareness', 'medicalProductKnowledgeDM'];
-        }
-        break;
-      case 'mrFeedback':
-        // Required for all types
-        requiredFields = ['punctuality', 'dressCode', 'pharmacyFeedback'];
-        break;
-      case 'comments':
-        // Optional
-        requiredFields = [];
-        break;
+    // Always required
+    requiredFields.addAll(['areaBrickName']);
+    
+    // Based on type of visit
+    if (typeOfVisit == 'Single') {
+      // Single: Only general fields required (no DM or MR questions)
+      // No additional required fields beyond areaBrickName
+    } else if (typeOfVisit == 'Double') {
+      // Double: Check if it's with DM or MR
+      final hasDM = widget.dmId != null && widget.dmId!.isNotEmpty;
+      final hasMR = widget.mrId != null && widget.mrId!.isNotEmpty;
+      
+      if (hasDM && !hasMR) {
+        // Double with DM only: DM questions required
+        requiredFields.addAll(['customerAwareness', 'medicalProductKnowledgeDM']);
+      } else if (!hasDM && hasMR) {
+        // Double with MR only: MR questions required
+        requiredFields.addAll(['punctuality', 'dressCode', 'pharmacyFeedback']);
+      }
+    } else if (typeOfVisit == 'Triple') {
+      // Triple: Both DM and MR Feedback required
+      requiredFields.addAll(['customerAwareness', 'medicalProductKnowledgeDM', 'punctuality', 'dressCode', 'pharmacyFeedback']);
     }
-
+    
     return requiredFields.every((field) => _formData[field] != null && _formData[field]!.isNotEmpty);
   }
 
-  void _handleNext() {
-    if (!_validateSection()) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please complete all required fields in this section')),
-      );
+  Future<void> _handleSubmit() async {
+    // Prevent multiple submissions
+    if (_isSubmitting) {
+      debugPrint('⚠️ Submit already in progress, ignoring duplicate submit');
       return;
     }
     
-    // Move to next section
-    if (_currentSection < _sections.length - 1) {
-      setState(() {
-        _currentSection++;
-      });
-    }
-  }
-
-  void _handlePrevious() {
-    if (_currentSection > 0) {
-      setState(() {
-        _currentSection--;
-      });
-    }
-  }
-
-  Future<void> _handleSubmit() async {
-    if (!_validateSection()) {
+    if (!_validateAllFields()) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please complete all required fields')),
       );
       return;
+    }
+    
+    // Set loading state
+    setState(() {
+      _isSubmitting = true;
+    });
+
+    // Capture location automatically (silently, user doesn't know)
+    double? lat;
+    double? lng;
+    String? locationName;
+    String? googleMapsUrl;
+    
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (serviceEnabled) {
+        LocationPermission permission = await Geolocator.checkPermission();
+        if (permission == LocationPermission.denied) {
+          permission = await Geolocator.requestPermission();
+        }
+        
+        if (permission == LocationPermission.whileInUse || permission == LocationPermission.always) {
+          Position position = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.high,
+          );
+          
+          lat = position.latitude;
+          lng = position.longitude;
+          locationName = 'Location at ${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}';
+          googleMapsUrl = 'https://www.google.com/maps?q=$lat,$lng';
+        }
+      }
+    } catch (e) {
+      // Location capture failed - continue without location
+      debugPrint('Failed to capture location: $e');
     }
 
     // Get DM and MR names from widget (passed from previous screen)
@@ -526,15 +230,15 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
         coachRole: widget.coachRole,
         // Brick Information
         brickName: _formData['areaBrickName'],
-        brickLocationLat: _formData['brickLocationLat'] != null ? double.tryParse(_formData['brickLocationLat']!) : null,
-        brickLocationLng: _formData['brickLocationLng'] != null ? double.tryParse(_formData['brickLocationLng']!) : null,
-        locationName: _formData['locationName'],
-        googleMapsUrl: _formData['googleMapsUrl'],
+        brickLocationLat: lat,
+        brickLocationLng: lng,
+        locationName: locationName,
+        googleMapsUrl: googleMapsUrl,
         visitCount: _formData['visitCount'] != null ? int.tryParse(_formData['visitCount']!) : 1,
         doctorsVisited: _doctorsVisitedController.text.trim().isNotEmpty ? _doctorsVisitedController.text.trim() : null,
         // PM/MSL Specific Fields
         areaBrickName: _areaBrickNameController.text.trim().isNotEmpty ? _areaBrickNameController.text.trim() : null,
-        typeOfVisit: _formData['typeOfVisit'],
+        typeOfVisit: _determineVisitType(), // Determine automatically based on DM and MR selection
         visitedAccountsNames: null, // Removed - Visit Details section deleted
         generalFeedback: _generalFeedbackController.text.trim().isNotEmpty ? _generalFeedbackController.text.trim() : null,
         // DM Feedback - only for DM reports
@@ -557,123 +261,243 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
       );
     }
 
-    final typeOfVisit = _formData['typeOfVisit'];
+    // Determine visit type automatically based on DM and MR selection
+    final typeOfVisit = _determineVisitType();
+    final hasDM = widget.dmId != null && widget.dmId!.isNotEmpty;
+    final hasMR = widget.mrId != null && widget.mrId!.isNotEmpty;
     
-    if (typeOfVisit == 'Double') {
-      // Double: Only MR Feedback - create one report for MR only
-      debugPrint('📝 Double Visit - creating one report for MR only');
-      
-      final mrReport = createReport(
-        mrId: _formData['mrId'] ?? widget.mrId ?? '',
-        mrName: selectedMRName,
-        isDMReport: false, // This is MR report
-      );
-      
-      try {
-        await widget.onSubmit(mrReport);
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Double visit: Report submitted successfully for MR!'),
-              backgroundColor: Colors.green,
-              duration: Duration(seconds: 3),
-            ),
-          );
-          // Navigate back after report is submitted
-          widget.onBack();
-        }
-      } catch (e) {
-        debugPrint('❌ Error submitting Double visit report: $e');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error submitting report: $e'),
-              backgroundColor: Colors.red,
-              duration: const Duration(seconds: 3),
-            ),
-          );
-        }
-      }
-    } else if (typeOfVisit == 'Triple') {
-      // Triple: Both DM and MR Feedback - create two reports
-      debugPrint('📝 Triple Visit - creating two reports: one for DM and one for MR');
-      
-      // Report 1: For Medical Representative (MR) - only MR feedback fields
-      final mrReport = createReport(
-        mrId: _formData['mrId'] ?? widget.mrId ?? '',
-        mrName: selectedMRName,
-        isDMReport: false, // This is MR report
-      );
-      
-      // Report 2: For District Manager (DM) - only DM feedback fields
-      // Use selected DM as the "MR" in this report (because DM is being coached)
-      final dmReport = createReport(
-        mrId: _formData['dmId'] ?? widget.dmId ?? '', // Use DM ID as "MR" ID for DM report
-        mrName: selectedDMName, // Use DM name as "MR" name
-        dmId: widget.coachId, // Coach ID
-        dmName: widget.coachName, // Coach name
-        isDMReport: true, // This is DM report
-      );
-      
-      // Submit both reports sequentially
-      try {
-        await widget.onSubmit(mrReport);
-        await widget.onSubmit(dmReport);
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Triple visit: Two reports submitted successfully (one for DM and one for MR)!'),
-              backgroundColor: Colors.green,
-              duration: Duration(seconds: 3),
-            ),
-          );
-          // Navigate back after both reports are submitted
-          widget.onBack();
-        }
-      } catch (e) {
-        debugPrint('❌ Error submitting Triple visit reports: $e');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error submitting reports: $e'),
-              backgroundColor: Colors.red,
-              duration: const Duration(seconds: 3),
-            ),
-          );
-        }
-      }
-    } else {
-      // Single: Default - create one report for MR
-      debugPrint('📝 Single Visit - creating one report for MR');
+    if (typeOfVisit == 'Single') {
+      // Single: No DM, No MR - only general fields
+      debugPrint('📝 Single Visit - creating one report with general fields only');
       
       final report = createReport(
-        mrId: _formData['mrId'] ?? widget.mrId ?? '',
-        mrName: selectedMRName,
-        isDMReport: false, // This is MR report
+        mrId: widget.coachId, // Use coach ID as MR ID for single visit
+        mrName: widget.coachName, // Use coach name as MR name
+        isDMReport: false, // No DM or MR questions, just general
       );
       
       try {
         await widget.onSubmit(report);
         
         if (mounted) {
+          setState(() {
+            _isSubmitting = false;
+          });
+          
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Report submitted successfully!'),
+              content: Text('Single visit: Report submitted successfully!'),
               backgroundColor: Colors.green,
               duration: Duration(seconds: 2),
             ),
           );
-          // Navigate back after report is submitted
-          widget.onBack();
+          
+          // Wait a bit before navigating back to ensure SnackBar is shown
+          await Future.delayed(const Duration(milliseconds: 500));
+          
+          if (mounted) {
+            widget.onBack();
+          }
         }
-      } catch (e) {
-        debugPrint('❌ Error submitting Single visit report: $e');
+      } catch (e, stackTrace) {
+        ErrorHandler.logError(e, context: 'PMMSLCoachingFormScreen._handleSubmit (Single)', stackTrace: stackTrace);
         if (mounted) {
+          setState(() {
+            _isSubmitting = false;
+          });
+          
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Error submitting report: $e'),
+              content: Text(ErrorHandler.getUserFriendlyMessage(e)),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      }
+    } else if (typeOfVisit == 'Double') {
+      if (hasDM && !hasMR) {
+        // Double with DM only
+        debugPrint('📝 Double Visit (DM only) - creating one report for DM');
+        
+        final dmReport = createReport(
+          mrId: _formData['dmId'] ?? widget.dmId ?? '', // Use DM ID as "MR" ID
+          mrName: selectedDMName, // Use DM name as "MR" name
+          dmId: widget.coachId, // Coach ID
+          dmName: widget.coachName, // Coach name
+          isDMReport: true, // This is DM report
+        );
+        
+        try {
+          await widget.onSubmit(dmReport);
+          
+          if (mounted) {
+            setState(() {
+              _isSubmitting = false;
+            });
+            
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Double visit (DM only): Report submitted successfully!'),
+                backgroundColor: Colors.green,
+                duration: Duration(seconds: 3),
+              ),
+            );
+            
+            // Wait a bit before navigating back to ensure SnackBar is shown
+            await Future.delayed(const Duration(milliseconds: 500));
+            
+            if (mounted) {
+              widget.onBack();
+            }
+          }
+        } catch (e, stackTrace) {
+          ErrorHandler.logError(e, context: 'PMMSLCoachingFormScreen._handleSubmit (Double DM)', stackTrace: stackTrace);
+          if (mounted) {
+            setState(() {
+              _isSubmitting = false;
+            });
+            
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(ErrorHandler.getUserFriendlyMessage(e)),
+                backgroundColor: Colors.red,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          }
+        }
+      } else if (!hasDM && hasMR) {
+        // Double with MR only
+        debugPrint('📝 Double Visit (MR only) - creating one report for MR');
+        
+        final mrReport = createReport(
+          mrId: _formData['mrId'] ?? widget.mrId ?? '',
+          mrName: selectedMRName,
+          isDMReport: false, // This is MR report
+        );
+        
+        try {
+          await widget.onSubmit(mrReport);
+          
+          if (mounted) {
+            setState(() {
+              _isSubmitting = false;
+            });
+            
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Double visit (MR only): Report submitted successfully!'),
+                backgroundColor: Colors.green,
+                duration: Duration(seconds: 3),
+              ),
+            );
+            
+            // Wait a bit before navigating back to ensure SnackBar is shown
+            await Future.delayed(const Duration(milliseconds: 500));
+            
+            if (mounted) {
+              widget.onBack();
+            }
+          }
+        } catch (e, stackTrace) {
+          ErrorHandler.logError(e, context: 'PMMSLCoachingFormScreen._handleSubmit (Double MR)', stackTrace: stackTrace);
+          if (mounted) {
+            setState(() {
+              _isSubmitting = false;
+            });
+            
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(ErrorHandler.getUserFriendlyMessage(e)),
+                backgroundColor: Colors.red,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          }
+        }
+      }
+    } else if (typeOfVisit == 'Triple') {
+      // Triple: Both DM and MR Feedback - create ONE report with both DM and MR questions
+      debugPrint('📝 Triple Visit - creating ONE report with both DM and MR questions');
+      
+      // Get selected DM info (the DM being coached)
+      final selectedDMId = _formData['dmId'] ?? widget.dmId ?? '';
+      
+      // Create a single report that includes both DM and MR feedback fields
+      // For Triple visit: dmId and dmName should contain the District Manager info (not the coach)
+      final tripleReport = CoachingReport(
+        date: widget.date,
+        dmId: selectedDMId.isNotEmpty ? selectedDMId : widget.coachId, // DM ID (the DM being coached)
+        dmName: selectedDMName.isNotEmpty ? selectedDMName : widget.coachName, // DM name (the DM being coached)
+        mrId: _formData['mrId'] ?? widget.mrId ?? '', // MR ID
+        mrName: selectedMRName, // MR name
+        coachRole: widget.coachRole,
+        // Brick Information
+        brickName: _formData['areaBrickName'],
+        brickLocationLat: lat,
+        brickLocationLng: lng,
+        locationName: locationName,
+        googleMapsUrl: googleMapsUrl,
+        visitCount: _formData['visitCount'] != null ? int.tryParse(_formData['visitCount']!) : 1,
+        doctorsVisited: _doctorsVisitedController.text.trim().isNotEmpty ? _doctorsVisitedController.text.trim() : null,
+        // PM/MSL Specific Fields
+        areaBrickName: _areaBrickNameController.text.trim().isNotEmpty ? _areaBrickNameController.text.trim() : null,
+        typeOfVisit: 'Triple',
+        visitedAccountsNames: null,
+        generalFeedback: _generalFeedbackController.text.trim().isNotEmpty ? _generalFeedbackController.text.trim() : null,
+        // DM Feedback - included in Triple report
+        teamwork: _formData['teamwork'],
+        customerAwareness: _formData['customerAwareness'],
+        medicalProductKnowledgeDM: _formData['medicalProductKnowledgeDM'],
+        dmFeedbackComments: _dmFeedbackCommentsController.text.trim().isNotEmpty ? _dmFeedbackCommentsController.text.trim() : null,
+        // MR Feedback - included in Triple report
+        punctuality: _formData['punctuality'],
+        dressCode: _formData['dressCode'],
+        pharmacyFeedback: _formData['pharmacyFeedback'],
+        reviewProfile: _formData['reviewProfile'],
+        patientCentricApproach: _formData['patientCentricApproach'],
+        medicalProductKnowledgeMR: _formData['medicalProductKnowledgeMR'],
+        engaging: _formData['engaging'],
+        featureBenefits: _formData['featureBenefits'],
+        closingCommitment: _formData['closingCommitment'],
+        mrFeedbackComments: _mrFeedbackCommentsController.text.trim().isNotEmpty ? _mrFeedbackCommentsController.text.trim() : null,
+        isQuickSession: widget.isQuickSession,
+      );
+      
+      try {
+        await widget.onSubmit(tripleReport);
+        
+        if (mounted) {
+          setState(() {
+            _isSubmitting = false;
+          });
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Triple visit: Report submitted successfully with both DM and MR questions!'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 3),
+            ),
+          );
+          
+          // Wait a bit before navigating back to ensure SnackBar is shown
+          await Future.delayed(const Duration(milliseconds: 500));
+          
+          if (mounted) {
+            widget.onBack();
+          }
+        }
+      } catch (e, stackTrace) {
+        ErrorHandler.logError(e, context: 'PMMSLCoachingFormScreen._handleSubmit (Triple)', stackTrace: stackTrace);
+        if (mounted) {
+          setState(() {
+            _isSubmitting = false;
+          });
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(ErrorHandler.getUserFriendlyMessage(e)),
               backgroundColor: Colors.red,
               duration: const Duration(seconds: 3),
             ),
@@ -759,75 +583,7 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
                         ),
                       ),
                     ),
-                  // Progress Bar
-                  SliverToBoxAdapter(
-                      child: Container(
-                        color: Colors.white,
-                        padding: const EdgeInsets.all(24),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Flexible(
-                                  child: Text(
-                                    'Section ${_currentSection + 1} of ${_sections.length}',
-                                    style: const TextStyle(
-                                      color: AppColors.gray600,
-                                      fontSize: 14,
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                Text(
-                                  '${((_currentSection + 1) / _sections.length * 100).round()}%',
-                                  style: const TextStyle(
-                                    color: AppColors.primaryBlue,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Container(
-                              height: 8,
-                              decoration: BoxDecoration(
-                                color: AppColors.gray200,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: FractionallySizedBox(
-                                alignment: Alignment.centerLeft,
-                                widthFactor: (_currentSection + 1) / _sections.length,
-                                child: Container(
-                                  decoration: const BoxDecoration(
-                                    gradient: AppColors.primaryGradientHorizontal,
-                                    borderRadius: BorderRadius.all(Radius.circular(4)),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                _currentSection < _sections.length 
-                                    ? (_sections[_currentSection]['title'] ?? '')
-                                    : '',
-                                style: const TextStyle(
-                                  color: AppColors.primaryBlue,
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                                maxLines: 2,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  // Form Content
+                  // Form Content - All sections in one scrollable page
                   SliverToBoxAdapter(
                       child: Form(
                         key: _formKey,
@@ -846,19 +602,19 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
                                 ),
                               ],
                             ),
-                            child: _buildSectionContent(),
+                            child: _buildAllSections(),
                           ),
                         ),
                       ),
                     ),
-                  // Bottom spacing for navigation buttons
+                  // Bottom spacing for submit button
                   const SliverToBoxAdapter(
                       child: SizedBox(height: 100),
                     ),
                   ],
                 ),
               ),
-            // Navigation Buttons (Fixed at bottom)
+            // Submit Button (Fixed at bottom)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
               decoration: BoxDecoration(
@@ -873,110 +629,121 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
               ),
               child: SafeArea(
                 top: false,
-                child: Row(
-                  children: [
-                    if (_currentSection > 0)
-                      Expanded(
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            border: Border.all(color: AppColors.primaryBlue, width: 2),
-                            borderRadius: BorderRadius.circular(12),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
-                                blurRadius: 4,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: Material(
-                            color: Colors.transparent,
-                            child: InkWell(
-                              onTap: _handlePrevious,
-                              borderRadius: BorderRadius.circular(12),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(vertical: 16),
-                                child: const Text(
-                                  'Previous',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    color: AppColors.primaryBlue,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: AppColors.primaryGradientHorizontal,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.primaryBlue.withOpacity(0.3),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
                       ),
-                    if (_currentSection > 0) const SizedBox(width: 16),
-                    Expanded(
-                      flex: 2,
+                    ],
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: _isSubmitting ? null : _handleSubmit,
+                      borderRadius: BorderRadius.circular(12),
                       child: Container(
-                        decoration: BoxDecoration(
-                          gradient: AppColors.primaryGradientHorizontal,
-                          borderRadius: BorderRadius.circular(12),
-                          boxShadow: [
-                            BoxShadow(
-                              color: AppColors.primaryBlue.withOpacity(0.3),
-                              blurRadius: 10,
-                              offset: const Offset(0, 4),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            if (_isSubmitting)
+                              const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                ),
+                              )
+                            else
+                              const Icon(Icons.send, color: Colors.white, size: 20),
+                            const SizedBox(width: 8),
+                            Text(
+                              _isSubmitting ? 'Submitting...' : 'Submit',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ],
                         ),
-                        child: Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            onTap: _currentSection < _sections.length - 1 ? _handleNext : _handleSubmit,
-                            borderRadius: BorderRadius.circular(12),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              child: Text(
-                                _currentSection < _sections.length - 1 ? 'Next' : 'Submit',
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
                       ),
                     ),
-                    ],
                   ),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
-      );
+      ),
+    );
   }
 
-  Widget _buildSectionContent() {
-    // Ensure current section is within bounds
-    if (_currentSection >= _sections.length) {
-      return const SizedBox();
-    }
+  Widget _buildAllSections() {
+    // Determine visit type automatically based on DM and MR selection
+    final typeOfVisit = _determineVisitType();
+    final hasDM = widget.dmId != null && widget.dmId!.isNotEmpty;
+    final hasMR = widget.mrId != null && widget.mrId!.isNotEmpty;
     
-    final sectionKey = _sections[_currentSection]['key'];
-    
-    switch (sectionKey) {
-      case 'basic':
-        return _buildBasicInformation();
-      case 'dmFeedback':
-        return _buildDMFeedback();
-      case 'mrFeedback':
-        return _buildMRFeedback();
-      case 'comments':
-        return _buildComments();
-      default:
-        return const SizedBox();
-    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Basic Information
+        _buildBasicInformation(),
+        const SizedBox(height: 32),
+        // DM Feedback - only show if:
+        // - Triple (has both DM and MR)
+        // - Double with DM only (has DM, no MR)
+        if ((typeOfVisit == 'Triple') || (typeOfVisit == 'Double' && hasDM && !hasMR)) ...[
+          const Text(
+            'DM Feedback',
+            style: TextStyle(
+              color: AppColors.primaryBlue,
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _buildDMFeedback(),
+          const SizedBox(height: 32),
+        ],
+        // MR Feedback - only show if:
+        // - Triple (has both DM and MR)
+        // - Double with MR only (no DM, has MR)
+        // - Single (no DM, no MR) - but this shouldn't show MR questions, only general
+        if ((typeOfVisit == 'Triple') || (typeOfVisit == 'Double' && !hasDM && hasMR)) ...[
+          const Text(
+            'MR Feedback',
+            style: TextStyle(
+              color: AppColors.primaryBlue,
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _buildMRFeedback(),
+          const SizedBox(height: 32),
+        ],
+        // Comments & Insights - always show
+        const Text(
+          'Comments & Insights',
+          style: TextStyle(
+            color: AppColors.primaryBlue,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 16),
+        _buildComments(),
+      ],
+    );
   }
 
   Widget _buildBasicInformation() {
@@ -996,14 +763,14 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
         ),
         const SizedBox(height: 24),
         _buildTextField(
-          label: 'District Manager *',
-          value: widget.dmName ?? '',
+          label: 'District Manager',
+          value: widget.dmName ?? 'No District Manager',
           enabled: false,
         ),
         const SizedBox(height: 24),
         _buildTextField(
-          label: 'Medical Representative (MR) *',
-          value: widget.mrName ?? '',
+          label: 'Medical Representative (MR)',
+          value: widget.mrName ?? 'No Medical Rep',
           enabled: false,
         ),
         const SizedBox(height: 24),
@@ -1029,120 +796,11 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
           ),
         ),
         const SizedBox(height: 24),
-        _buildDropdownField(
-          label: 'Type of Visit *',
-          value: _formData['typeOfVisit'],
-          items: const [
-            DropdownMenuItem(value: 'Single', child: Text('Single')),
-            DropdownMenuItem(value: 'Double', child: Text('Double')),
-            DropdownMenuItem(value: 'Triple', child: Text('Triple')),
-          ],
-          onChanged: (value) {
-            // Save current section index before changing type
-            final savedSectionIndex = _currentSection;
-            
-            _updateField('typeOfVisit', value ?? '');
-            
-            // Stay in same section if it's Basic Info (0)
-            // This allows user to complete all fields before moving to next section
-            setState(() {
-              // If we're in Basic Info, stay there
-              if (savedSectionIndex == 0) {
-                _currentSection = savedSectionIndex;
-              } else {
-                // If we're in a feedback section, go back to Basic Info
-                _currentSection = 0;
-              }
-            });
-          },
-        ),
-        const SizedBox(height: 24),
-        // Location Picker
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppColors.gray200, width: 2),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text(
-                'Brick Location',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.gray700,
-                ),
-              ),
-              const SizedBox(height: 12),
-              if (_currentPosition != null) ...[
-                if (_locationName != null && _locationName!.isNotEmpty) ...[
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppColors.primaryCyan.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.place, color: AppColors.primaryCyan, size: 20),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _locationName!,
-                            style: const TextStyle(
-                              color: AppColors.gray700,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                ],
-                Text(
-                  'Lat: ${_currentPosition!.latitude.toStringAsFixed(6)}, Lng: ${_currentPosition!.longitude.toStringAsFixed(6)}',
-                  style: const TextStyle(color: AppColors.gray600),
-                ),
-                if (_googleMapsUrl != null) ...[
-                  const SizedBox(height: 8),
-                  ElevatedButton.icon(
-                    onPressed: () async {
-                      final uri = Uri.parse(_googleMapsUrl!);
-                      if (await canLaunchUrl(uri)) {
-                        await launchUrl(uri, mode: LaunchMode.externalApplication);
-                      }
-                    },
-                    icon: const Icon(Icons.map, size: 18),
-                    label: const Text('View on Google Maps'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primaryCyan,
-                      foregroundColor: Colors.white,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 12),
-              ],
-              ElevatedButton.icon(
-                onPressed: _locationLoading ? null : _getCurrentLocation,
-                icon: _locationLoading
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.location_on),
-                label: Text(_locationLoading ? 'Getting Location...' : 'Get Current Location'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primaryBlue,
-                  foregroundColor: Colors.white,
-                ),
-              ),
-            ],
-          ),
+        // Display visit type automatically (read-only)
+        _buildTextField(
+          label: 'Type of Visit',
+          value: _determineVisitType(),
+          enabled: false,
         ),
         const SizedBox(height: 24),
         TextField(
@@ -1434,123 +1092,87 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
         Text(
           '$label *',
           style: const TextStyle(
-            fontSize: 16,
+            fontSize: 15,
             fontWeight: FontWeight.w600,
             color: AppColors.gray700,
           ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 10),
         Row(
           children: [
-            Expanded(
-              child: GestureDetector(
-                onTap: () => _updateField(field, 'Yes'),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeInOut,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  decoration: BoxDecoration(
-                    gradient: isYes ? AppColors.primaryGradientHorizontal : null,
-                    color: isYes ? null : Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: isYes ? AppColors.primaryCyan : AppColors.gray300,
-                      width: isYes ? 3 : 2,
-                    ),
-                    boxShadow: isYes
-                        ? [
-                            BoxShadow(
-                              color: AppColors.primaryCyan.withOpacity(0.4),
-                              blurRadius: 12,
-                              offset: const Offset(0, 6),
-                            ),
-                          ]
-                        : [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.05),
-                              blurRadius: 4,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
+            InkWell(
+              onTap: () => _updateField(field, 'Yes'),
+              child: Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  gradient: isYes ? AppColors.primaryGradientHorizontal : null,
+                  color: isYes ? null : Colors.white,
+                  border: Border.all(
+                    color: isYes ? Colors.transparent : AppColors.gray300,
+                    width: 2,
                   ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.check_circle,
-                        color: isYes ? Colors.white : AppColors.gray400,
-                        size: 24,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Yes',
-                        style: TextStyle(
-                          color: isYes ? Colors.white : AppColors.gray700,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
+                  shape: BoxShape.circle,
+                  boxShadow: isYes
+                      ? [
+                          BoxShadow(
+                            color: AppColors.primaryCyan.withOpacity(0.4),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : null,
+                ),
+                child: Center(
+                  child: Text(
+                    'Yes',
+                    style: TextStyle(
+                      color: isYes ? Colors.white : AppColors.gray700,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),
             ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: GestureDetector(
-                onTap: () => _updateField(field, 'No'),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeInOut,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  decoration: BoxDecoration(
-                    gradient: isNo 
-                        ? LinearGradient(
-                            colors: [Colors.red.shade400, Colors.red.shade600],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          )
-                        : null,
-                    color: isNo ? null : Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: isNo ? Colors.red.shade400 : AppColors.gray300,
-                      width: isNo ? 3 : 2,
-                    ),
-                    boxShadow: isNo
-                        ? [
-                            BoxShadow(
-                              color: Colors.red.withOpacity(0.4),
-                              blurRadius: 12,
-                              offset: const Offset(0, 6),
-                            ),
-                          ]
-                        : [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.05),
-                              blurRadius: 4,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
+            const SizedBox(width: 12),
+            InkWell(
+              onTap: () => _updateField(field, 'No'),
+              child: Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  gradient: isNo 
+                      ? LinearGradient(
+                          colors: [Colors.red.shade400, Colors.red.shade600],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        )
+                      : null,
+                  color: isNo ? null : Colors.white,
+                  border: Border.all(
+                    color: isNo ? Colors.transparent : AppColors.gray300,
+                    width: 2,
                   ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.cancel,
-                        color: isNo ? Colors.white : AppColors.gray400,
-                        size: 24,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'No',
-                        style: TextStyle(
-                          color: isNo ? Colors.white : AppColors.gray700,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
+                  shape: BoxShape.circle,
+                  boxShadow: isNo
+                      ? [
+                          BoxShadow(
+                            color: Colors.red.withOpacity(0.4),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : null,
+                ),
+                child: Center(
+                  child: Text(
+                    'No',
+                    style: TextStyle(
+                      color: isNo ? Colors.white : AppColors.gray700,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),
@@ -1569,97 +1191,66 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
           label,
           style: const TextStyle(
             color: AppColors.gray700,
-            fontSize: 16,
+            fontSize: 15,
             fontWeight: FontWeight.w600,
           ),
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
         ),
-        const SizedBox(height: 16),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            // Increased spacing from 8 to 12
-            final spacing = 12.0;
-            final buttonWidth = (constraints.maxWidth - (5 * spacing)) / 6;
-            return Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: List.generate(6, (index) {
-                final rating = (index + 1).toString();
-                final isSelected = _formData[field] == rating;
-                return AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeOutBack,
-                  width: buttonWidth,
-                  transform: isSelected 
-                      ? (Matrix4.identity()..scale(1.05))
-                      : Matrix4.identity(),
-                  transformAlignment: Alignment.center,
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: () => _updateField(field, rating),
-                      borderRadius: BorderRadius.circular(14),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        // Increased vertical padding from 12 to 16
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        decoration: BoxDecoration(
-                          gradient: isSelected
-                              ? AppColors.primaryGradientHorizontal
-                              : null,
-                          color: isSelected ? null : Colors.white,
-                          border: Border.all(
-                            color: isSelected
-                                ? Colors.transparent
-                                : AppColors.gray300,
-                            width: 2,
+        const SizedBox(height: 12),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: List.generate(6, (index) {
+            final rating = (index + 1).toString();
+            final isSelected = _formData[field] == rating;
+            return InkWell(
+              onTap: () => _updateField(field, rating),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  gradient: isSelected
+                      ? AppColors.primaryGradientHorizontal
+                      : null,
+                  color: isSelected ? null : Colors.white,
+                  border: Border.all(
+                    color: isSelected
+                        ? Colors.transparent
+                        : AppColors.gray300,
+                    width: 2,
+                  ),
+                  shape: BoxShape.circle,
+                  boxShadow: isSelected
+                      ? [
+                          BoxShadow(
+                            color: AppColors.primaryBlue.withOpacity(0.4),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
                           ),
-                          borderRadius: BorderRadius.circular(14),
-                          boxShadow: isSelected
-                              ? [
-                                  BoxShadow(
-                                    color: AppColors.primaryBlue.withOpacity(0.4),
-                                    blurRadius: 12,
-                                    offset: const Offset(0, 4),
-                                  ),
-                                ]
-                              : [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.05),
-                                    blurRadius: 4,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              rating,
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: isSelected ? Colors.white : AppColors.gray700,
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            if (isSelected) ...[
-                              const SizedBox(height: 2),
-                              const Icon(
-                                Icons.check_circle,
-                                color: Colors.white,
-                                size: 14,
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
+                        ]
+                      : [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 4,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
+                ),
+                child: Center(
+                  child: Text(
+                    rating,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: isSelected ? Colors.white : AppColors.gray700,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                );
-              }),
+                ),
+              ),
             );
-          },
+          }),
         ),
       ],
     );

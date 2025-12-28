@@ -12,7 +12,6 @@ import 'package:biosyn_report_flutter/services/supabase_service.dart';
 import 'package:biosyn_report_flutter/utils/responsive.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'dart:async';
 
 class DMDashboardScreen extends StatefulWidget {
@@ -948,7 +947,7 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                                                         ),
                                                       ),
                                                       const Text(
-                                                        'Visits',
+                                                        'Coaching Visits',
                                                         style: TextStyle(
                                                           color: AppColors.gray600,
                                                           fontSize: 12,
@@ -1152,7 +1151,7 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                                                         borderRadius: BorderRadius.circular(8),
                                                       ),
                                                       child: Text(
-                                                        'Visit ${index + 1}',
+                                                        'Coaching Visit ${index + 1}',
                                                         style: TextStyle(
                                                           color: vScoreColor,
                                                           fontSize: 10,
@@ -1207,7 +1206,7 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                           children: [
                                             const Text(
-                                              'Total Visits',
+                                              'Total Coaching Visits',
                                               style: TextStyle(
                                                 color: AppColors.gray600,
                                                 fontSize: 12,
@@ -1494,45 +1493,6 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
     );
   }
 
-  Widget _buildModalInfoItemWithAction(String label, String actionText, VoidCallback onAction) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: const TextStyle(
-                    color: AppColors.gray600,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                TextButton.icon(
-                  onPressed: onAction,
-                  icon: const Icon(Icons.map, size: 16),
-                  label: Text(actionText),
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppColors.primaryCyan,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      side: const BorderSide(color: AppColors.primaryCyan, width: 1.5),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   Widget _buildModalInfoItem(String label, String value) {
     return Container(
@@ -1897,24 +1857,6 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                             _buildModalInfoItem('Medical Rep', report.mrName),
                             if (report.brickName != null && report.brickName!.isNotEmpty)
                               _buildModalInfoItem('Brick Name', report.brickName!),
-                            if (report.locationName != null && report.locationName!.isNotEmpty)
-                              _buildModalInfoItem('Location', report.locationName!),
-                            if (report.brickLocationLat != null && report.brickLocationLng != null)
-                              _buildModalInfoItem(
-                                'Coordinates',
-                                '${report.brickLocationLat!.toStringAsFixed(6)}, ${report.brickLocationLng!.toStringAsFixed(6)}',
-                              ),
-                            if (report.googleMapsUrl != null && report.googleMapsUrl!.isNotEmpty)
-                              _buildModalInfoItemWithAction(
-                                'Google Maps',
-                                'View on Maps',
-                                () async {
-                                  final uri = Uri.parse(report.googleMapsUrl!);
-                                  if (await canLaunchUrl(uri)) {
-                                    await launchUrl(uri, mode: LaunchMode.externalApplication);
-                                  }
-                                },
-                              ),
                             if (report.visitCount != null && report.visitCount! > 0)
                               _buildModalInfoItem('Visit Count', report.visitCount.toString()),
                             if (report.doctorsVisited != null && report.doctorsVisited!.isNotEmpty)

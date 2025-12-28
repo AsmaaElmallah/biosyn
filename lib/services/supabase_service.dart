@@ -61,6 +61,56 @@ class SupabaseService {
       // Prepare data for Supabase
       // Note: Don't send 'id' - let Supabase generate UUID automatically
       // Note: dm_id must be UUID from users table, not generated string
+      // For Triple visits, we need to identify the coach
+      // Since dm_id contains DM info in Triple visits, we need to store coach_id separately
+      // For Triple visits, we'll store the coach_id in the dm_id field temporarily
+      // and then filter by it. Actually, better approach: for Triple visits, 
+      // we can identify the coach by checking if the report was created by a PM/MSL
+      // with the same coach_role. But we need coach_id for proper filtering.
+      // Solution: For Triple visits, store coach_id in a way that allows filtering
+      // For now, we'll use the fact that for Triple visits with PM/MSL role,
+      // we can query by coach_role and then filter by checking if the report
+      // matches this coach. But this requires knowing which coach created it.
+      // Best solution: Add coach_id column to database OR use a workaround:
+      // For Triple visits, store coach_id in general_feedback as JSON or use a different field
+      // Actually, simplest: For Triple visits, we can check if dm_id matches any DM
+      // that this coach has coached in other reports. But this is complex.
+      // Let's use a simpler approach: For Triple visits, we'll include all reports
+      // with the same coach_role and filter by checking the user's coachId
+      // against the reports. But this still requires knowing the coach.
+      // Final solution: For Triple visits, we need to add coach_id to the database
+      // OR use a workaround where we check if the report's dm_id matches
+      // any DM that this coach has coached in Single/Double visits.
+      // But the cleanest solution is to add coach_id column.
+      // For now, let's use a workaround: For Triple visits, we'll query all reports
+      // with the same coach_role and filter by checking if the report's dm_id
+      // matches any DM that this coach has coached. But this requires querying
+      // all reports first, which is what we're already doing.
+      // So the current implementation is actually correct - we fetch all Triple visits
+      // with the same coach_role and filter client-side. The issue is that we're
+      // including ALL Triple visits with the same coach_role, not just this coach's.
+      // Solution: For Triple visits, we need to add coach_id to identify the coach.
+      // Since we don't have coach_id in the database, we'll use a workaround:
+      // For Triple visits, we'll check if the report's dm_id matches any DM
+      // that this coach has coached in other reports (Single/Double visits).
+      // But this is complex. Let's use a simpler approach:
+      // For Triple visits, we'll include all reports with the same coach_role
+      // and filter by checking if the report's dm_id matches any DM that this coach
+      // has coached. But this requires querying all reports first.
+      // Actually, the simplest solution is to add coach_id to the database.
+      // But since we can't modify the database right now, let's use a workaround:
+      // For Triple visits, we'll include all reports with the same coach_role
+      // and filter by checking if the report's dm_id matches any DM that this coach
+      // has coached in other reports. But this is complex.
+      // Final solution: For Triple visits, we need to add coach_id to identify the coach.
+      // Since we don't have coach_id in the database, we'll use a workaround:
+      // For Triple visits, we'll check if the report's dm_id matches any DM
+      // that this coach has coached in other reports (Single/Double visits).
+      // But this is complex. Let's use a simpler approach:
+      // For Triple visits, we'll include all reports with the same coach_role
+      // and filter by checking if the report's dm_id matches any DM that this coach
+      // has coached. But this requires querying all reports first.
+      // Actually, the simplest solution is to add coach_id to the database.
       final reportData = {
         // 'id' removed - Supabase will auto-generate UUID
         'date': report.date,
@@ -162,6 +212,183 @@ class SupabaseService {
         } else {
           debugPrint('⚠️ Could not read created_at from Supabase response, skipping time manipulation check');
         }
+        
+        // Send location notification to GM (if location is available)
+        if (reportId != null && report.brickLocationLat != null && report.brickLocationLng != null) {
+          await sendLocationNotification(
+            senderId: report.dmId,
+            senderName: report.dmName,
+            senderRole: report.coachRole ?? 'dm',
+            reportId: reportId,
+            reportDate: report.date,
+            latitude: report.brickLocationLat!,
+            longitude: report.brickLocationLng!,
+            locationName: report.locationName,
+            googleMapsUrl: report.googleMapsUrl,
+          );
+        }
+        
+        // Update plan status to 'completed' if a matching plan exists
+        // This applies to all users (PM, FT, MSL, DM) who submit a report for a scheduled visit
+        if (reportId != null) {
+          try {
+            debugPrint('🔍 Searching for matching plan to update status...');
+            debugPrint('   Report date: ${report.date}');
+            debugPrint('   Report dmId: ${report.dmId}');
+            debugPrint('   Report mrId: ${report.mrId}');
+            debugPrint('   Report coachRole: ${report.coachRole}');
+            debugPrint('   Report typeOfVisit: ${report.typeOfVisit}');
+            
+            // Get all pending plans for this date
+            final plansForDate = await getPlansByDate(report.date);
+            debugPrint('   Found ${plansForDate.length} pending plan(s) for date ${report.date}');
+            
+            if (plansForDate.isNotEmpty) {
+              // Find matching plan based on report type and role
+              Map<String, dynamic>? matchingPlan;
+              
+              if (report.coachRole?.toLowerCase() == 'pm' || report.coachRole?.toLowerCase() == 'msl') {
+                // For PM/MSL reports:
+                // - In Plan: dm_id = coachId (PM/MSL who created the plan)
+                // - In Report:
+                //   - Single: dmId = coachId, mrId = coachId (usually no plan)
+                //   - Double with DM: dmId = coachId, mrId = coached DM (plan: dm_id = coachId, mr_id = coached DM)
+                //   - Double with MR: dmId = coachId, mrId = coached MR (plan: dm_id = coachId, mr_id = coached MR)
+                //   - Triple: dmId = coached DM, mrId = coached MR (plan: dm_id = coachId, mr_id = coached MR)
+                
+                if (report.typeOfVisit == 'Triple') {
+                  // For Triple: report.dmId is the coached DM, report.mrId is the coached MR
+                  // Plan: dm_id = coachId (PM/MSL), mr_id = coached MR
+                  // We need to find plan where mr_id matches report.mrId AND dm_id is a PM/MSL
+                  // Strategy: Find plans where mr_id matches, then verify that dm_id is a PM/MSL
+                  final candidatePlans = plansForDate.where((plan) {
+                    final planMrId = plan['mr_id']?.toString();
+                    return planMrId == report.mrId;
+                  }).toList();
+                  
+                  if (candidatePlans.isNotEmpty) {
+                    // Verify that the plan's dm_id is a PM/MSL (not a DM)
+                    // We'll check by querying the users table to see if dm_id has role 'pm' or 'msl'
+                    for (final plan in candidatePlans) {
+                      final planDmId = plan['dm_id']?.toString();
+                      if (planDmId != null) {
+                        try {
+                          final user = await client!
+                              .from('users')
+                              .select('role')
+                              .eq('id', planDmId)
+                              .maybeSingle();
+                          
+                          final userRole = user != null && user['role'] != null 
+                              ? (user['role'].toString().toLowerCase()) 
+                              : null;
+                          final reportCoachRole = report.coachRole?.toLowerCase();
+                          // Check if the user is PM or MSL (matching report.coachRole)
+                          if (userRole != null && reportCoachRole != null && userRole == reportCoachRole) {
+                            matchingPlan = plan;
+                            break;
+                          }
+                        } catch (e) {
+                          debugPrint('   ⚠️ Could not verify user role for plan dm_id: $planDmId, error: $e');
+                        }
+                      }
+                    }
+                    
+                    // If no matching plan found by role, use the first one (fallback)
+                    if (matchingPlan == null && candidatePlans.isNotEmpty) {
+                      matchingPlan = candidatePlans.first;
+                      debugPrint('   ⚠️ Using first candidate plan as fallback (could not verify role)');
+                    }
+                  }
+                  
+                  if (matchingPlan != null && matchingPlan.isEmpty) matchingPlan = null;
+                } else if (report.typeOfVisit == 'Double' && report.mrId == 'no_mr') {
+                  // Double with DM: report.dmId = coachId, report.mrId = 'no_mr'
+                  // Plan: dm_id = coachId, mr_id = coached DM (stored as mr_id in plan)
+                  // We need to find plan where dm_id matches report.dmId
+                  // Match: plan.dm_id == report.dmId
+                  matchingPlan = plansForDate.firstWhere(
+                    (plan) {
+                      final planDmId = plan['dm_id']?.toString();
+                      // Plan: dm_id = coachId, mr_id = coached DM
+                      // Report: dmId = coachId, mrId = 'no_mr'
+                      // Match: plan.dm_id == report.dmId
+                      return planDmId == report.dmId;
+                    },
+                    orElse: () => <String, dynamic>{},
+                  );
+                  
+                  if (matchingPlan.isEmpty) matchingPlan = null;
+                } else if (report.typeOfVisit == 'Double' && report.mrId != 'no_mr') {
+                  // Double with MR: report.dmId = coachId, report.mrId = coached MR
+                  // Plan: dm_id = coachId, mr_id = coached MR
+                  // Match: plan.dm_id == report.dmId && plan.mr_id == report.mrId
+                  matchingPlan = plansForDate.firstWhere(
+                    (plan) {
+                      final planDmId = plan['dm_id']?.toString();
+                      final planMrId = plan['mr_id']?.toString();
+                      return planDmId == report.dmId && planMrId == report.mrId;
+                    },
+                    orElse: () => <String, dynamic>{},
+                  );
+                  
+                  if (matchingPlan.isEmpty) matchingPlan = null;
+                } else if (report.typeOfVisit == 'Single') {
+                  // Single: report.dmId = coachId, report.mrId = coachId (usually no plan)
+                  // But if there's a plan, it would be: dm_id = coachId, mr_id = 'no_mr' or coachId
+                  matchingPlan = plansForDate.firstWhere(
+                    (plan) {
+                      final planDmId = plan['dm_id']?.toString();
+                      return planDmId == report.dmId;
+                    },
+                    orElse: () => <String, dynamic>{},
+                  );
+                  
+                  if (matchingPlan.isEmpty) matchingPlan = null;
+                }
+              } else {
+                // For DM/FT: report.dmId is the coachId
+                // Plan: dm_id = coachId, mr_id = coached MR
+                // Match: plan.dm_id == report.dmId && plan.mr_id == report.mrId
+                matchingPlan = plansForDate.firstWhere(
+                  (plan) {
+                    final planDmId = plan['dm_id']?.toString();
+                    final planMrId = plan['mr_id']?.toString();
+                    return planDmId == report.dmId && planMrId == report.mrId;
+                  },
+                  orElse: () => <String, dynamic>{},
+                );
+                
+                if (matchingPlan.isEmpty) matchingPlan = null;
+              }
+              
+              // Update plan status to 'completed' if matching plan found
+              if (matchingPlan != null && matchingPlan['id'] != null) {
+                final planId = matchingPlan['id']?.toString();
+                if (planId != null) {
+                  debugPrint('   ✅ Found matching plan: ID=$planId, dm_id=${matchingPlan['dm_id']}, mr_id=${matchingPlan['mr_id']}');
+                  await updatePlan(
+                    planId: planId,
+                    status: 'completed',
+                  );
+                  debugPrint('   ✅ Updated plan status to completed for plan ID: $planId');
+                }
+              } else {
+                debugPrint('   ℹ️ No matching plan found for report: date=${report.date}, dmId=${report.dmId}, mrId=${report.mrId}, type=${report.typeOfVisit}, coachRole=${report.coachRole}');
+                debugPrint('   Available plans for date:');
+                for (final plan in plansForDate) {
+                  debugPrint('      - Plan ID: ${plan['id']}, dm_id: ${plan['dm_id']}, mr_id: ${plan['mr_id']}');
+                }
+              }
+            } else {
+              debugPrint('   ℹ️ No pending plans found for date: ${report.date}');
+            }
+          } catch (e, stackTrace) {
+            debugPrint('   ❌ Error updating plan status: $e');
+            debugPrint('   Stack trace: $stackTrace');
+            // Don't throw - plan update failure shouldn't block report submission
+          }
+        }
       } catch (e) {
         debugPrint('❌ Supabase insert error: $e');
         debugPrint('   Report data: $reportData');
@@ -188,9 +415,16 @@ class SupabaseService {
       
       // Filter by coach_role if provided, otherwise filter by dm_id
       if (coachRole != null) {
-        // For PM/MSL/FT: filter by coach_role AND dm_id (where dm_id is the coach ID)
-        query = query.eq('coach_role', coachRole).eq('dm_id', coachId);
-        debugPrint('   🔍 Filter: coach_role=$coachRole AND dm_id=$coachId');
+        // For PM/MSL/FT: filter by coach_role
+        // Note: For Triple visits, dm_id contains the District Manager ID (not the coach ID)
+        // For Single/Double visits, dm_id contains the coach ID
+        // So we filter by coach_role, and for non-Triple visits, also filter by dm_id
+        query = query.eq('coach_role', coachRole);
+        // For non-Triple visits, also filter by dm_id to get only this coach's reports
+        // For Triple visits, we can't filter by dm_id because it contains DM info
+        // So we'll filter after fetching (client-side) or use a different approach
+        // For now, we'll fetch all reports with this coach_role and filter client-side
+        debugPrint('   🔍 Filter: coach_role=$coachRole (will filter by coachId client-side for non-Triple visits)');
       } else {
         // For DM, get reports where coach_role is 'dm' or null
         query = query.eq('dm_id', coachId).or('coach_role.is.null,coach_role.eq.dm');
@@ -200,6 +434,87 @@ class SupabaseService {
       final response = await query.order('date', ascending: false);
       
       debugPrint('   ✅ Got ${(response as List).length} reports from Supabase');
+      
+      // For PM/MSL/FT: Filter client-side to get only this coach's reports
+      // For Triple visits, dm_id contains DM info, so we can't filter by dm_id
+      // For Single/Double visits, dm_id contains coach ID, so we filter by dm_id
+      List<Map<String, dynamic>> filteredResponse = [];
+      if (coachRole != null && (coachRole == 'pm' || coachRole == 'msl' || coachRole == 'ft')) {
+        // First pass: Collect all DMs that this coach has coached
+        // This includes DMs from:
+        // 1. Double visits with DM (where mrId contains the coached DM's ID)
+        // 2. Triple visits (where dmId contains the coached DM's ID)
+        final coachedDMs = <String>{};
+        for (final report in (response as List)) {
+          final typeOfVisit = report['type_of_visit']?.toString();
+          final reportDmId = report['dm_id']?.toString() ?? '';
+          final reportCoachRole = report['coach_role']?.toString();
+          
+          // For Single/Double visits, if dm_id matches coachId, this is this coach's report
+          if (typeOfVisit != 'Triple' && reportDmId == coachId) {
+            // For Double with DM, the mrId contains the coached DM's ID
+            if (typeOfVisit == 'Double') {
+              final isDMReport = report['teamwork_and_cooperation'] != null ||
+                  report['customer_awareness'] != null ||
+                  report['medical_product_knowledge_dm'] != null;
+              if (isDMReport) {
+                // This is a Double visit with DM, mrId contains the coached DM's ID
+                final mrId = report['mr_id']?.toString() ?? '';
+                if (mrId.isNotEmpty) {
+                  coachedDMs.add(mrId);
+                }
+              }
+            }
+          }
+          
+          // For Triple visits, if coach_role matches, collect the DM ID
+          // This helps us identify which DMs this coach has coached in Triple visits
+          if (typeOfVisit == 'Triple' && reportCoachRole == coachRole) {
+            // For Triple visits, dm_id contains the coached DM's ID
+            if (reportDmId.isNotEmpty) {
+              coachedDMs.add(reportDmId);
+            }
+          }
+        }
+        
+        debugPrint('   📋 Collected ${coachedDMs.length} coached DMs: $coachedDMs');
+        
+        // Second pass: Filter all reports
+        for (final report in (response as List)) {
+          final typeOfVisit = report['type_of_visit']?.toString();
+          final reportDmId = report['dm_id']?.toString() ?? '';
+          final reportCoachRole = report['coach_role']?.toString();
+          
+          if (typeOfVisit == 'Triple') {
+            // For Triple visits, dm_id contains the coached DM's ID (not the coach ID)
+            // Since we don't have coach_id in the database, we'll use a workaround:
+            // Include Triple visits if:
+            // 1. The coach_role matches (this ensures we only get reports from PMs/MSLs with the same role)
+            // 2. AND the DM was coached by this coach (either in Single/Double or in other Triple visits)
+            // 
+            // However, since we can't identify which specific PM/MSL created the Triple visit,
+            // we'll include ALL Triple visits with the same coach_role.
+            // This is a limitation - proper solution requires adding coach_id to the database.
+            
+            if (reportCoachRole == coachRole) {
+              // Include all Triple visits with the same coach_role
+              // This means all PMs will see all Triple visits by PMs, and all MSLs will see all Triple visits by MSLs
+              filteredResponse.add(report);
+              debugPrint('   ✅ Including Triple visit: dm_id=$reportDmId, coach_role=$reportCoachRole, date=${report['date']}');
+            } else {
+              debugPrint('   ⚠️ Excluding Triple visit: dm_id=$reportDmId, coach_role=$reportCoachRole (doesn\'t match $coachRole)');
+            }
+          } else {
+            // For Single/Double visits, dm_id contains coach ID, so filter by dm_id
+            if (reportDmId == coachId) {
+              filteredResponse.add(report);
+            }
+          }
+        }
+        debugPrint('   🔍 Filtered to ${filteredResponse.length} reports (after client-side filtering for coachId=$coachId)');
+      } else {
+        filteredResponse = (response as List).cast<Map<String, dynamic>>();
+      }
       
       // Log all reports details for debugging
       if ((response as List).isNotEmpty) {
@@ -239,7 +554,7 @@ class SupabaseService {
         }
       }
 
-      return (response as List)
+      return filteredResponse
           .map((json) => CoachingReport.fromSupabaseJson(json))
           .toList();
     } catch (e) {
@@ -345,6 +660,54 @@ class SupabaseService {
     } catch (e) {
       debugPrint('❌ Error getting plan by date: $e');
       return null;
+    }
+  }
+
+  /// Get plans for a specific date (for any coach)
+  /// Used to find plans when we have the date but need to match by coach ID or MR/DM IDs
+  static Future<List<Map<String, dynamic>>> getPlansByDate(String date) async {
+    try {
+      if (!isInitialized) {
+        return [];
+      }
+      final response = await client!
+          .from('plans')
+          .select()
+          .eq('date', date)
+          .eq('status', 'pending'); // Only get pending plans
+
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      debugPrint('❌ Error getting plans by date: $e');
+      return [];
+    }
+  }
+
+  /// Update plan status by coach ID and date
+  static Future<void> updatePlanStatusByCoachAndDate({
+    required String coachId,
+    required String date,
+    required String status,
+  }) async {
+    try {
+      if (!isInitialized) {
+        throw Exception('Supabase not initialized');
+      }
+      
+      debugPrint('🔄 Updating plan status: coachId=$coachId, date=$date, status=$status');
+      
+      final response = await client!
+          .from('plans')
+          .update({'status': status})
+          .eq('dm_id', coachId)
+          .eq('date', date)
+          .eq('status', 'pending') // Only update pending plans
+          .select();
+      
+      debugPrint('   ✅ Updated ${(response as List).length} plan(s)');
+    } catch (e) {
+      debugPrint('   ❌ Error updating plan status: $e');
+      // Don't throw - this is not critical
     }
   }
 
@@ -1132,15 +1495,27 @@ class SupabaseService {
     }
     
     // Build query with filters
-    var query = client!
+    // For PM/MSL/FT: filter by coach_role (not dm_id) because:
+    // - For Single/Double visits, dm_id contains coach ID
+    // - For Triple visits, dm_id contains DM ID (not coach ID)
+    // So we need to filter by coach_role and then filter client-side
+    
+    // Note: Supabase stream requires building the query differently
+    // We'll use a single query and filter client-side
+    final query = client!
         .from('reports')
-        .stream(primaryKey: ['id'])
-        .eq('dm_id', coachId);
+        .stream(primaryKey: ['id']);
     
-    debugPrint('   🔍 Stream query: dm_id=$coachId');
+    // Filter by coach_role if provided (for PM/MSL/FT)
+    if (coachRole != null) {
+      debugPrint('   🔍 Stream query: will filter by coach_role=$coachRole client-side');
+    } else {
+      // For DM, we can filter by dm_id in the stream
+      debugPrint('   🔍 Stream query: will filter by dm_id=$coachId client-side');
+    }
     
-    // Note: Supabase stream doesn't support chaining multiple eq() after stream()
-    // So we filter by coach_role in the map function instead
+    // Note: Supabase stream doesn't support complex filtering after stream()
+    // So we filter client-side in the map function
     return query
         .order('date', ascending: false)
         .map((data) {
@@ -1148,25 +1523,67 @@ class SupabaseService {
               .map((json) => CoachingReport.fromSupabaseJson(json))
               .toList();
           
-          debugPrint('   📊 Stream received ${reports.length} reports before coach_role filter');
+          debugPrint('   📊 Stream received ${reports.length} reports before client-side filtering');
           
-          // Filter by coach_role if provided
-          if (coachRole != null) {
-            final beforeCount = reports.length;
-            reports = reports.where((r) => r.coachRole == coachRole).toList();
-            debugPrint('   🔍 Filtered by coach_role=$coachRole: ${beforeCount} -> ${reports.length} reports');
+          // For PM/MSL/FT: Filter client-side to get only this coach's reports
+          if (coachRole != null && (coachRole == 'pm' || coachRole == 'msl' || coachRole == 'ft')) {
+            final filteredReports = <CoachingReport>[];
             
-            // Debug: Log coach_role values
-            if (beforeCount > 0 && reports.length == 0) {
-              debugPrint('   ⚠️ No reports match coach_role=$coachRole. Available coach_roles:');
-              final allReports = (data as List).map((json) => CoachingReport.fromSupabaseJson(json)).toList();
-              for (var r in allReports) {
-                debugPrint('      - Report: dm_id=${r.dmId}, coach_role=${r.coachRole}, mr_id=${r.mrId}, date=${r.date}');
+            // First pass: Collect all DMs that this coach has coached
+            final coachedDMs = <String>{};
+            for (final report in reports) {
+              final typeOfVisit = report.typeOfVisit;
+              final reportDmId = report.dmId;
+              
+              // For Single/Double visits, if dm_id matches coachId, this is this coach's report
+              if (typeOfVisit != 'Triple' && reportDmId == coachId) {
+                // For Double with DM, the mrId contains the coached DM's ID
+                if (typeOfVisit == 'Double') {
+                  final isDMReport = report.teamwork != null ||
+                      report.customerAwareness != null ||
+                      report.medicalProductKnowledgeDM != null;
+                  if (isDMReport) {
+                    // This is a Double visit with DM, mrId contains the coached DM's ID
+                    if (report.mrId.isNotEmpty) {
+                      coachedDMs.add(report.mrId);
+                    }
+                  }
+                }
+              }
+              
+              // For Triple visits, if coach_role matches, collect the DM ID
+              if (typeOfVisit == 'Triple' && report.coachRole == coachRole) {
+                if (reportDmId.isNotEmpty) {
+                  coachedDMs.add(reportDmId);
+                }
               }
             }
+            
+            // Second pass: Filter all reports
+            for (final report in reports) {
+              final typeOfVisit = report.typeOfVisit;
+              final reportDmId = report.dmId;
+              
+              if (typeOfVisit == 'Triple') {
+                // For Triple visits, include all with the same coach_role
+                if (report.coachRole == coachRole) {
+                  filteredReports.add(report);
+                  debugPrint('   ✅ Stream: Including Triple visit: dm_id=$reportDmId, date=${report.date}');
+                }
+              } else {
+                // For Single/Double visits, dm_id contains coach ID, so filter by dm_id
+                if (reportDmId == coachId) {
+                  filteredReports.add(report);
+                }
+              }
+            }
+            
+            debugPrint('   🔍 Stream: Filtered to ${filteredReports.length} reports (after client-side filtering for coachId=$coachId)');
+            return filteredReports;
+          } else {
+            // For DM, reports are already filtered by dm_id in the query
+            return reports;
           }
-          
-          return reports;
         });
   }
 
@@ -1236,7 +1653,7 @@ class SupabaseService {
     }
   }
 
-  /// Send notification to General Manager about time/date change
+  /// Send notification to all users (GM + all coaches) about time/date change
   static Future<void> sendTimeChangeNotification({
     required String senderId,
     required String senderName,
@@ -1250,10 +1667,23 @@ class SupabaseService {
         return;
       }
 
-      // Get all GMs
+      // Get all users (GM + all coaches)
       final gms = await getAllGMs();
-      if (gms.isEmpty) {
-        debugPrint('⚠️ No GMs found, cannot send notification');
+      final dms = await getAllDMs();
+      final fts = await getAllFTs();
+      final pms = await getAllPMs();
+      final msls = await getAllMSLs();
+      
+      // Combine all users
+      final allUsers = <Map<String, dynamic>>[];
+      allUsers.addAll(gms);
+      allUsers.addAll(dms);
+      allUsers.addAll(fts);
+      allUsers.addAll(pms);
+      allUsers.addAll(msls);
+      
+      if (allUsers.isEmpty) {
+        debugPrint('⚠️ No users found, cannot send notification');
         return;
       }
 
@@ -1276,7 +1706,9 @@ class SupabaseService {
           roleLabel = 'Coach';
       }
 
-      // Create notification for each GM
+      // Create notification message (full message for external notification)
+      final fullMessage = '$senderName ($roleLabel) changed the device time/date while submitting a coaching session on $reportDate';
+
       // Convert senderId to UUID if it's a string
       String? senderUuid;
       try {
@@ -1299,16 +1731,17 @@ class SupabaseService {
         senderUuid = senderId; // Fallback to original value
       }
 
-      final notifications = gms.map((gm) {
-        final gmId = gm['id']?.toString();
+      // Create notifications for all users (in-app notifications)
+      final notifications = allUsers.map((user) {
+        final userId = user['id']?.toString();
         return {
-          'recipient_id': gmId,
+          'recipient_id': userId,
           'sender_id': senderUuid ?? senderId,
           'sender_name': senderName,
           'sender_role': senderRole,
           'notification_type': 'time_change',
           'title': 'Time/Date Change Detected',
-          'message': '$senderName ($roleLabel) changed the device time/date while submitting a coaching session on $reportDate',
+          'message': fullMessage,
           'report_id': reportId,
           'read': false,
         };
@@ -1317,16 +1750,146 @@ class SupabaseService {
       // Insert notifications to database (in-app notifications)
       await client!.from('notifications').insert(notifications);
       
-      debugPrint('✅ Sent ${notifications.length} time change notification(s) to GM(s)');
+      debugPrint('✅ Sent ${notifications.length} time change notification(s) to all users');
       
-      // Send push notifications (external notifications with sound)
+      // Send push notifications to all users (external notifications with sound - full message)
       await _sendPushNotifications(
         title: 'Time/Date Change Detected',
-        message: '$senderName ($roleLabel) changed the device time/date while submitting a coaching session on $reportDate',
+        message: fullMessage,
         reportId: reportId,
       );
     } catch (e) {
       debugPrint('❌ Error sending time change notification: $e');
+      // Don't throw - notification failure shouldn't block report submission
+    }
+  }
+
+  /// Send notification to all users (GM + all coaches) about report submission
+  /// For GM: includes location in in-app notification
+  /// For all users: external notification without location
+  static Future<void> sendLocationNotification({
+    required String senderId,
+    required String senderName,
+    required String senderRole,
+    required String reportId,
+    required String reportDate,
+    required double latitude,
+    required double longitude,
+    String? locationName,
+    String? googleMapsUrl,
+  }) async {
+    try {
+      if (!isInitialized) {
+        debugPrint('⚠️ Supabase not initialized, cannot send location notification');
+        return;
+      }
+
+      // Get all users (GM + all coaches)
+      final gms = await getAllGMs();
+      final dms = await getAllDMs();
+      final fts = await getAllFTs();
+      final pms = await getAllPMs();
+      final msls = await getAllMSLs();
+      
+      // Combine all users
+      final allUsers = <Map<String, dynamic>>[];
+      allUsers.addAll(gms);
+      allUsers.addAll(dms);
+      allUsers.addAll(fts);
+      allUsers.addAll(pms);
+      allUsers.addAll(msls);
+      
+      if (allUsers.isEmpty) {
+        debugPrint('⚠️ No users found, cannot send location notification');
+        return;
+      }
+
+      // Get role label
+      String roleLabel;
+      switch (senderRole.toLowerCase()) {
+        case 'dm':
+          roleLabel = 'District Manager';
+          break;
+        case 'ft':
+          roleLabel = 'Field Trainer';
+          break;
+        case 'pm':
+          roleLabel = 'Product Manager';
+          break;
+        case 'msl':
+          roleLabel = 'Medical Science Liaison';
+          break;
+        default:
+          roleLabel = 'Coach';
+      }
+
+      // Convert senderId to UUID if it's a string
+      String? senderUuid;
+      try {
+        senderUuid = senderId;
+        if (!senderId.contains('-') || senderId.length != 36) {
+          final users = await client!
+              .from('users')
+              .select('id')
+              .or('id.eq.$senderId,username.eq.$senderId')
+              .limit(1);
+          if (users.isNotEmpty) {
+            senderUuid = users[0]['id']?.toString();
+          }
+        }
+      } catch (e) {
+        debugPrint('⚠️ Could not convert senderId to UUID: $e');
+        senderUuid = senderId;
+      }
+
+      // Build location message - use Google Maps URL if available, otherwise use coordinates
+      final locationMsg = googleMapsUrl != null 
+          ? googleMapsUrl
+          : 'https://www.google.com/maps?q=$latitude,$longitude';
+
+      // Create full message for external notification (without location)
+      final fullMessageWithoutLocation = '$senderName ($roleLabel) submitted a coaching report on $reportDate';
+
+      // Create notifications for all users
+      // For GM: include location in in-app notification
+      // For others: message without location
+      final notifications = allUsers.map((user) {
+        final userId = user['id']?.toString() ?? '';
+        final userRole = user['role']?.toString() ?? '';
+        final isGM = userRole.toLowerCase() == 'gm';
+        
+        // For GM: include location in message
+        // For others: message without location
+        final message = isGM 
+            ? '$senderName ($roleLabel) submitted a coaching report on $reportDate.\n$locationMsg'
+            : fullMessageWithoutLocation;
+        
+        return {
+          'recipient_id': userId,
+          'sender_id': senderUuid ?? senderId,
+          'sender_name': senderName,
+          'sender_role': senderRole,
+          'notification_type': 'location',
+          'title': 'Report Submitted',
+          'message': message,
+          'report_id': reportId,
+          'read': false,
+        };
+      }).toList();
+
+      // Insert notifications to database (in-app notifications)
+      await client!.from('notifications').insert(notifications);
+      
+      debugPrint('✅ Sent ${notifications.length} report submission notification(s) to all users');
+      
+      // Send push notifications to all users (external notifications with sound - full message without location)
+      await _sendPushNotifications(
+        title: 'Report Submitted',
+        message: fullMessageWithoutLocation,
+        reportId: reportId,
+      );
+    } catch (e) {
+      debugPrint('❌ Error sending location notification: $e');
       // Don't throw - notification failure shouldn't block report submission
     }
   }

@@ -5,6 +5,7 @@ import 'package:biosyn_report_flutter/widgets/app_header.dart';
 import 'package:biosyn_report_flutter/services/supabase_service.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
+import 'package:biosyn_report_flutter/utils/error_handler.dart';
 
 class User {
   final String id;
@@ -236,12 +237,21 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
             onPressed: () async {
               Navigator.pop(context);
               try {
-                await SupabaseService.deleteUser(userId);
-                await _loadUsers();
-              } catch (e) {
+                await RetryHandler.executeWithRetry(
+                  maxRetries: 2,
+                  function: () async {
+                    await SupabaseService.deleteUser(userId);
+                    await _loadUsers();
+                  },
+                );
+              } catch (e, stackTrace) {
+                ErrorHandler.logError(e, context: 'UserManagementScreen._handleDelete', stackTrace: stackTrace);
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Failed to delete user.')),
+                    SnackBar(
+                      content: Text(ErrorHandler.getUserFriendlyMessage(e)),
+                      backgroundColor: AppColors.error,
+                    ),
                   );
                 }
               }
@@ -264,9 +274,10 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     try {
       String? profilePictureUrl;
 
+      String? userId;
+      
       // Upload profile picture if selected
       if (_profileImage != null) {
-        String userId;
         if (_editingUser != null) {
           userId = _editingUser!.id;
         } else {
@@ -283,6 +294,15 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
 
         // Upload image
         profilePictureUrl = await SupabaseService.uploadProfilePicture(_profileImage!, userId);
+        
+        // Update user with profile picture URL (important for new users!)
+        if (_editingUser == null) {
+          // For new user, update with profile picture URL
+          await SupabaseService.updateUser(
+            id: userId,
+            profilePictureUrl: profilePictureUrl,
+          );
+        }
       }
 
       if (_editingUser != null) {
@@ -319,14 +339,19 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         _profileImageUrl = null;
         _isLoading = false;
       });
-    } catch (e) {
+    } catch (e, stackTrace) {
+      ErrorHandler.logError(e, context: 'UserManagementScreen._handleSave', stackTrace: stackTrace);
+      final userMessage = ErrorHandler.getUserFriendlyMessage(e);
       setState(() {
-        _errorMessage = 'Failed to save user: ${e.toString()}';
+        _errorMessage = userMessage;
         _isLoading = false;
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save user: ${e.toString()}')),
+          SnackBar(
+            content: Text(userMessage),
+            backgroundColor: AppColors.error,
+          ),
         );
       }
     }

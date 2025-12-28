@@ -36,6 +36,7 @@ class GMDashboardScreen extends StatefulWidget {
 
 class _GMDashboardScreenState extends State<GMDashboardScreen> {
   Map<String, String?> _coachProfilePictures = {}; // Map of coach name -> profile_picture_url
+  Map<String, String> _coachNames = {}; // Map of coach ID -> coach name
   int _unreadNotificationsCount = 0;
   Timer? _notificationsTimer;
 
@@ -43,6 +44,7 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
   void initState() {
     super.initState();
     _loadCoachProfiles();
+    _loadCoachNames();
     if (widget.gmId != null) {
       _loadUnreadNotificationsCount();
       // Refresh notifications count every 30 seconds
@@ -124,6 +126,62 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
     }
   }
 
+  Future<void> _loadCoachNames() async {
+    try {
+      debugPrint('👤 Loading coach names...');
+      final dms = await SupabaseService.getAllDMs();
+      final fts = await SupabaseService.getAllFTs();
+      final pms = await SupabaseService.getAllPMs();
+      final msls = await SupabaseService.getAllMSLs();
+      
+      final coachNamesMap = <String, String>{};
+      for (final coach in [...dms, ...fts, ...pms, ...msls]) {
+        final id = (coach['id'] ?? '').toString();
+        final name = (coach['name'] ?? '').toString();
+        if (id.isNotEmpty && name.isNotEmpty) {
+          coachNamesMap[id] = name;
+        }
+      }
+      
+      debugPrint('   ✅ Loaded ${coachNamesMap.length} coach names');
+      if (mounted) {
+        setState(() {
+          _coachNames = coachNamesMap;
+        });
+      }
+    } catch (e) {
+      debugPrint('   ❌ Error loading coach names: $e');
+    }
+  }
+
+  Future<String?> _getCoachName(String coachId, String? coachRole) async {
+    // First check cache
+    if (_coachNames.containsKey(coachId)) {
+      return _coachNames[coachId];
+    }
+    
+    // If not in cache, fetch from Supabase
+    try {
+      final user = await SupabaseService.getUserById(coachId);
+      if (user != null) {
+        final id = (user['id'] ?? '').toString();
+        final name = (user['name'] ?? '').toString();
+        if (id.isNotEmpty && name.isNotEmpty) {
+          if (mounted) {
+            setState(() {
+              _coachNames[id] = name;
+            });
+          }
+          return name;
+        }
+      }
+    } catch (e) {
+      debugPrint('   ❌ Error fetching coach name: $e');
+    }
+    
+    return null;
+  }
+
   String _getProfilePictureUrl(String coachName) {
     // Extract clean name (remove role suffix if exists)
     String cleanName = coachName;
@@ -184,16 +242,81 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
     // For DM/FT: include only MR reports
     final allCoachReports = allReports.where((r) => r.mrId.isNotEmpty).toList();
 
+    // First, collect all coach IDs from Single/Double visits to map them to Triple visits
+    // Group by coachRole to find coach IDs for each role
+    final coachIdsByRole = <String, Set<String>>{}; // Map of coachRole -> Set of coach IDs
     for (final report in allCoachReports) {
-      // Use coach name based on coachRole, fallback to dmName
-      final coachName = report.coachRole != null && report.coachRole!.isNotEmpty
-          ? '${report.dmName} (${report.coachRole!.toUpperCase()})'
-          : report.dmName;
-      
-      if (coachName.isEmpty) continue;
-      
       final coachRole = report.coachRole ?? 'dm';
       final isPMMSL = coachRole == 'pm' || coachRole == 'msl';
+      
+      if (isPMMSL && report.typeOfVisit != 'Triple' && report.dmId.isNotEmpty) {
+        // For Single/Double visits, dmId contains the coach ID
+        if (!coachIdsByRole.containsKey(coachRole)) {
+          coachIdsByRole[coachRole] = <String>{};
+        }
+        coachIdsByRole[coachRole]!.add(report.dmId);
+      }
+    }
+    
+    for (final report in allCoachReports) {
+      final coachRole = report.coachRole ?? 'dm';
+      final isPMMSL = coachRole == 'pm' || coachRole == 'msl';
+      
+      // Get coach ID and name
+      String? coachId;
+      String coachName;
+      
+      if (isPMMSL) {
+        // For PM/MSL reports:
+        // - In Single/Double visits: dmId contains the coach ID
+        // - In Triple visits: dmId contains the coached DM ID, so we need to find the coach ID from other reports
+        if (report.typeOfVisit == 'Triple') {
+          // For Triple Visit, try to find coach ID from Single/Double visits with same coachRole
+          // Use the first available coach ID for this role that has a name in cache
+          final coachIdsForRole = coachIdsByRole[coachRole] ?? <String>{};
+          coachId = coachIdsForRole.firstWhere(
+            (id) => _coachNames.containsKey(id) && _coachNames[id]!.isNotEmpty,
+            orElse: () => coachIdsForRole.isNotEmpty ? coachIdsForRole.first : '',
+          );
+          
+          // If still not found, try to get from any Single/Double report with same coachRole
+          if (coachId.isEmpty) {
+            final similarReport = allCoachReports.firstWhere(
+              (r) => r.coachRole == coachRole && 
+                     r.typeOfVisit != 'Triple' && 
+                     r.dmId.isNotEmpty,
+              orElse: () => report,
+            );
+            coachId = similarReport.dmId;
+          }
+        } else {
+          // For Single/Double visits, dmId contains the coach ID
+          coachId = report.dmId;
+        }
+        
+        // Get coach name from cache or use dmName as fallback
+        if (coachId.isNotEmpty && _coachNames.containsKey(coachId) && _coachNames[coachId]!.isNotEmpty) {
+          coachName = '${_coachNames[coachId]} (${coachRole.toUpperCase()})';
+        } else {
+          // Fallback: for Triple visits, don't use dmName (it's the coached DM name)
+          // Instead, try to fetch from Supabase or use a placeholder
+          if (report.typeOfVisit == 'Triple') {
+            // For Triple Visit, we can't use dmName as it's the coached DM
+            // We'll use a placeholder that will be updated when coach names are loaded
+            coachName = 'Coach (${coachRole.toUpperCase()})';
+          } else {
+            coachName = report.dmName.isNotEmpty 
+                ? '${report.dmName} (${coachRole.toUpperCase()})'
+                : 'Unknown (${coachRole.toUpperCase()})';
+          }
+        }
+      } else {
+        // For DM/FT: dmId contains the coach ID
+        coachId = report.dmId;
+        coachName = report.dmName;
+      }
+      
+      if (coachName.isEmpty) continue;
       
       if (!coachStats.containsKey(coachName)) {
         coachStats[coachName] = {
@@ -202,6 +325,7 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
           'mrIds': <String>{},
           'dmIds': <String>{}, // Add DM IDs for PM/MSL
           'role': coachRole,
+          'coachId': coachId, // Store coach ID for later use
         };
       }
 
@@ -276,6 +400,7 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
         'dmCount': dmCount,
         'totalCount': totalCount, // For PM/MSL: MRs + DMs
         'role': role,
+        'coachId': entry.value['coachId'], // Store coach ID for fetching correct name
       };
     }).whereType<Map<String, dynamic>>().toList();
   }
@@ -462,7 +587,7 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
                     children: [
                       Expanded(
                         child: _buildStatCard(
-                          'Total Visits',
+                          'Total Coaching Visits',
                           '$totalVisits',
                           'All Coaches combined',
                           Icons.timeline,
@@ -960,19 +1085,54 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
                                                     Row(
                                                       children: [
                                                         Expanded(
-                                                          child: Text(
-                                                            dm['fullName'] ?? dm['name'],
-                                                            style: const TextStyle(
-                                                              fontSize: 16,
-                                                              fontWeight: FontWeight.w600,
-                                                              color: AppColors.gray900,
-                                                            ),
-                                                            overflow: TextOverflow.ellipsis,
-                                                            maxLines: 1,
+                                                          child: FutureBuilder<String?>(
+                                                            future: () async {
+                                                              final coachId = dm['coachId'] as String?;
+                                                              if (coachId != null && coachId.isNotEmpty) {
+                                                                return await _getCoachName(coachId, dm['role'] as String?);
+                                                              }
+                                                              return null;
+                                                            }(),
+                                                            builder: (context, snapshot) {
+                                                              final actualCoachName = snapshot.data ?? (dm['fullName'] ?? dm['name']) as String;
+                                                              return Text(
+                                                                actualCoachName,
+                                                                style: const TextStyle(
+                                                                  fontSize: 16,
+                                                                  fontWeight: FontWeight.w600,
+                                                                  color: AppColors.gray900,
+                                                                ),
+                                                                overflow: TextOverflow.ellipsis,
+                                                                maxLines: 1,
+                                                              );
+                                                            },
                                                           ),
                                                         ),
                                                         // Quick Session indicator (if any reports are quick sessions)
-                                                        if (_hasQuickSessionsForCoach(dm['fullName'] ?? dm['name']))
+                                                        Builder(
+                                                          builder: (context) {
+                                                            final coachId = dm['coachId'] as String?;
+                                                            final coachNameForCheck = coachId != null && _coachNames.containsKey(coachId) 
+                                                                ? _coachNames[coachId]!
+                                                                : (dm['fullName'] ?? dm['name']) as String;
+                                                            return _hasQuickSessionsForCoach(coachNameForCheck)
+                                                                ? Container(
+                                                                    margin: const EdgeInsets.only(left: 8),
+                                                                    padding: const EdgeInsets.all(4),
+                                                                    decoration: BoxDecoration(
+                                                                      color: AppColors.error.withOpacity(0.1),
+                                                                      shape: BoxShape.circle,
+                                                                      border: Border.all(color: AppColors.error, width: 1.5),
+                                                                    ),
+                                                                    child: const Icon(
+                                                                      Icons.close,
+                                                                      color: AppColors.error,
+                                                                      size: 12,
+                                                                    ),
+                                                                  )
+                                                                : const SizedBox.shrink();
+                                                          },
+                                                        ),
                                                           Container(
                                                             margin: const EdgeInsets.only(left: 8),
                                                             padding: const EdgeInsets.all(4),
@@ -1040,9 +1200,7 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
                                             children: [
                                               Expanded(
                                                 child: _buildDMStatItem(
-                                                  dm['role'] == 'pm' || dm['role'] == 'msl' || dm['role'] == 'ft' || dm['role'] == 'dm'
-                                                      ? 'Coaching Visits'
-                                                      : 'Visits',
+                                                  'Coaching Visits',
                                                   '${dm['visits']}',
                                                   AppColors.primaryBlue,
                                                 ),

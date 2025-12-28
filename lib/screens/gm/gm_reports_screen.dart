@@ -37,12 +37,99 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
   Map<String, String?> _mrNamesToIds = {}; // Map of MR name -> MR ID for lookup
   Set<String> _mrIds = {}; // Set of MR IDs from users table
   Set<String> _dmIds = {}; // Set of DM IDs from users table
+  Map<String, String> _coachNames = {}; // Map of coach ID -> coach name
 
   @override
   void initState() {
     super.initState();
     _loadMRProfiles();
     _loadMRRoles();
+    _loadCoachNames();
+  }
+
+  Future<void> _loadCoachNames() async {
+    try {
+      debugPrint('👤 Loading coach names...');
+      final dms = await SupabaseService.getAllDMs();
+      final fts = await SupabaseService.getAllFTs();
+      final pms = await SupabaseService.getAllPMs();
+      final msls = await SupabaseService.getAllMSLs();
+      
+      final coachNamesMap = <String, String>{};
+      for (final coach in [...dms, ...fts, ...pms, ...msls]) {
+        final id = (coach['id'] ?? '').toString();
+        final name = (coach['name'] ?? '').toString();
+        if (id.isNotEmpty && name.isNotEmpty) {
+          coachNamesMap[id] = name;
+        }
+      }
+      
+      debugPrint('   ✅ Loaded ${coachNamesMap.length} coach names');
+      if (mounted) {
+        setState(() {
+          _coachNames = coachNamesMap;
+        });
+      }
+    } catch (e) {
+      debugPrint('   ❌ Error loading coach names: $e');
+    }
+  }
+
+  Future<String?> _getCoachName(String? coachId, String? coachRole) async {
+    if (coachId == null || coachId.isEmpty) return null;
+    
+    // First check cache
+    if (_coachNames.containsKey(coachId)) {
+      return _coachNames[coachId];
+    }
+    
+    // If not in cache, fetch from Supabase
+    try {
+      final user = await SupabaseService.getUserById(coachId);
+      if (user != null) {
+        final id = (user['id'] ?? '').toString();
+        final name = (user['name'] ?? '').toString();
+        if (id.isNotEmpty && name.isNotEmpty) {
+          if (mounted) {
+            setState(() {
+              _coachNames[id] = name;
+            });
+          }
+          return name;
+        }
+      }
+    } catch (e) {
+      debugPrint('   ❌ Error fetching coach name: $e');
+    }
+    
+    return null;
+  }
+
+  String? _getCoachIdFromReport(CoachingReport report) {
+    final coachRole = report.coachRole ?? 'dm';
+    final isPMMSL = coachRole == 'pm' || coachRole == 'msl';
+    
+    if (isPMMSL) {
+      // For PM/MSL reports:
+      // - In Single/Double visits: dmId contains the coach ID
+      // - In Triple visits: dmId contains the coached DM ID, so we need to find the coach ID from other reports
+      if (report.typeOfVisit == 'Triple') {
+        // For Triple Visit, try to find coach ID from Single/Double visits with same coachRole
+        final similarReport = widget.reports.firstWhere(
+          (r) => r.coachRole == coachRole && 
+                 r.typeOfVisit != 'Triple' && 
+                 r.dmId.isNotEmpty,
+          orElse: () => report,
+        );
+        return similarReport.dmId;
+      } else {
+        // For Single/Double visits, dmId contains the coach ID
+        return report.dmId;
+      }
+    } else {
+      // For DM/FT: dmId contains the coach ID
+      return report.dmId;
+    }
   }
 
   Future<void> _loadMRProfiles() async {
@@ -748,50 +835,201 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                                               child: Column(
                                                 crossAxisAlignment: CrossAxisAlignment.start,
                                                 children: [
-                                                  Text(
-                                                    report.mrName,
-                                                    style: const TextStyle(
-                                                      fontSize: 16,
-                                                      fontWeight: FontWeight.bold,
-                                                      color: AppColors.gray900,
+                                                  // For Triple visit, show first name of DM + dash + first name of MR
+                                                  if (report.typeOfVisit == 'Triple' && report.dmName.isNotEmpty && report.mrName.isNotEmpty)
+                                                    Column(
+                                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                                      children: [
+                                                        Text(
+                                                          () {
+                                                            // Get first name only (first word) from DM and MR names
+                                                            final dmParts = report.dmName.trim().split(' ');
+                                                            final mrParts = report.mrName.trim().split(' ');
+                                                            final dmFirstName = dmParts.isNotEmpty ? dmParts[0] : '';
+                                                            final mrFirstName = mrParts.isNotEmpty ? mrParts[0] : '';
+                                                            return '$dmFirstName - $mrFirstName';
+                                                          }(),
+                                                          style: const TextStyle(
+                                                            fontSize: 16,
+                                                            fontWeight: FontWeight.bold,
+                                                            color: AppColors.gray900,
+                                                          ),
+                                                          overflow: TextOverflow.ellipsis,
+                                                          maxLines: 1,
+                                                        ),
+                                                        const SizedBox(height: 4),
+                                                        Text(
+                                                          'Triple Visit',
+                                                          style: const TextStyle(
+                                                            color: AppColors.gray600,
+                                                            fontSize: 12,
+                                                          ),
+                                                          overflow: TextOverflow.ellipsis,
+                                                          maxLines: 1,
+                                                        ),
+                                                        const SizedBox(height: 4),
+                                                        // Show PM/MSL + name
+                                                        FutureBuilder<String?>(
+                                                          future: _getCoachName(_getCoachIdFromReport(report), report.coachRole),
+                                                          builder: (context, snapshot) {
+                                                            final coachName = snapshot.data ?? 'Loading...';
+                                                            final coachRole = report.coachRole ?? 'pm';
+                                                            final roleAbbrev = coachRole == 'pm' ? 'PM' : coachRole == 'msl' ? 'MSL' : coachRole.toUpperCase();
+                                                            return Row(
+                                                              children: [
+                                                                const Icon(Icons.person_outline, size: 14, color: AppColors.gray400),
+                                                                const SizedBox(width: 4),
+                                                                Expanded(
+                                                                  child: Text(
+                                                                    '$roleAbbrev: $coachName',
+                                                                    style: const TextStyle(
+                                                                      color: AppColors.gray600,
+                                                                      fontSize: 12,
+                                                                    ),
+                                                                    overflow: TextOverflow.ellipsis,
+                                                                  ),
+                                                                ),
+                                                              ],
+                                                            );
+                                                          },
+                                                        ),
+                                                        const SizedBox(height: 2),
+                                                        // Show DM + name
+                                                        Row(
+                                                          children: [
+                                                            const Icon(Icons.person_outline, size: 14, color: AppColors.gray400),
+                                                            const SizedBox(width: 4),
+                                                            Expanded(
+                                                              child: Text(
+                                                                'DM: ${report.dmName}',
+                                                                style: const TextStyle(
+                                                                  color: AppColors.gray600,
+                                                                  fontSize: 12,
+                                                                ),
+                                                                overflow: TextOverflow.ellipsis,
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                        const SizedBox(height: 2),
+                                                        // Show MR + name
+                                                        Row(
+                                                          children: [
+                                                            const Icon(Icons.badge_outlined, size: 14, color: AppColors.gray400),
+                                                            const SizedBox(width: 4),
+                                                            Expanded(
+                                                              child: Text(
+                                                                'MR: ${report.mrName}',
+                                                                style: const TextStyle(
+                                                                  color: AppColors.gray600,
+                                                                  fontSize: 12,
+                                                                ),
+                                                                overflow: TextOverflow.ellipsis,
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ],
+                                                    )
+                                                  else
+                                                    // For Single Visit or other visit types
+                                                    Column(
+                                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                                      children: [
+                                                        Text(
+                                                          report.mrName,
+                                                          style: const TextStyle(
+                                                            fontSize: 16,
+                                                            fontWeight: FontWeight.bold,
+                                                            color: AppColors.gray900,
+                                                          ),
+                                                          overflow: TextOverflow.ellipsis,
+                                                          maxLines: 1,
+                                                        ),
+                                                        const SizedBox(height: 4),
+                                                        // For Single Visit, show "Single Visit" and PM once
+                                                        if (report.typeOfVisit == 'Single')
+                                                          Column(
+                                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                                            children: [
+                                                              Text(
+                                                                'Single Visit',
+                                                                style: const TextStyle(
+                                                                  color: AppColors.gray600,
+                                                                  fontSize: 12,
+                                                                ),
+                                                                overflow: TextOverflow.ellipsis,
+                                                                maxLines: 1,
+                                                              ),
+                                                              const SizedBox(height: 4),
+                                                              FutureBuilder<String?>(
+                                                                future: _getCoachName(_getCoachIdFromReport(report), report.coachRole),
+                                                                builder: (context, snapshot) {
+                                                                  final coachName = snapshot.data ?? report.dmName;
+                                                                  final coachRole = report.coachRole ?? 'pm';
+                                                                  final roleAbbrev = coachRole == 'pm' ? 'PM' : coachRole == 'msl' ? 'MSL' : coachRole.toUpperCase();
+                                                                  return Row(
+                                                                    children: [
+                                                                      const Icon(Icons.person_outline, size: 14, color: AppColors.gray400),
+                                                                      const SizedBox(width: 4),
+                                                                      Expanded(
+                                                                        child: Text(
+                                                                          '$roleAbbrev: $coachName',
+                                                                          style: const TextStyle(
+                                                                            color: AppColors.gray600,
+                                                                            fontSize: 12,
+                                                                          ),
+                                                                          overflow: TextOverflow.ellipsis,
+                                                                        ),
+                                                                      ),
+                                                                    ],
+                                                                  );
+                                                                },
+                                                              ),
+                                                            ],
+                                                          )
+                                                        else
+                                                          // For other visit types (Double, etc.)
+                                                          Column(
+                                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                                            children: [
+                                                              Row(
+                                                                children: [
+                                                                  const Icon(Icons.person_outline, size: 14, color: AppColors.gray400),
+                                                                  const SizedBox(width: 4),
+                                                                  Expanded(
+                                                                    child: Text(
+                                                                      '${_getCoachRoleLabel(report.coachRole)}: ${report.dmName}',
+                                                                      style: const TextStyle(
+                                                                        color: AppColors.gray600,
+                                                                        fontSize: 12,
+                                                                      ),
+                                                                      overflow: TextOverflow.ellipsis,
+                                                                    ),
+                                                                  ),
+                                                                ],
+                                                              ),
+                                                              const SizedBox(height: 2),
+                                                              Row(
+                                                                children: [
+                                                                  const Icon(Icons.badge_outlined, size: 14, color: AppColors.gray400),
+                                                                  const SizedBox(width: 4),
+                                                                  Expanded(
+                                                                    child: Text(
+                                                                      '${_getRoleLabel(_mrRoles[report.mrId] ?? 'MR')}: ${report.mrName}',
+                                                                      style: const TextStyle(
+                                                                        color: AppColors.gray600,
+                                                                        fontSize: 12,
+                                                                      ),
+                                                                      overflow: TextOverflow.ellipsis,
+                                                                    ),
+                                                                  ),
+                                                                ],
+                                                              ),
+                                                            ],
+                                                          ),
+                                                      ],
                                                     ),
-                                                    overflow: TextOverflow.ellipsis,
-                                                    maxLines: 1,
-                                                  ),
-                                                  const SizedBox(height: 4),
-                                                  Row(
-                                                    children: [
-                                                      const Icon(Icons.person_outline, size: 14, color: AppColors.gray400),
-                                                      const SizedBox(width: 4),
-                                                      Expanded(
-                                                        child: Text(
-                                                          '${_getCoachRoleLabel(report.coachRole)}: ${report.dmName}',
-                                                          style: const TextStyle(
-                                                            color: AppColors.gray600,
-                                                            fontSize: 12,
-                                                          ),
-                                                          overflow: TextOverflow.ellipsis,
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                  const SizedBox(height: 2),
-                                                  Row(
-                                                    children: [
-                                                      const Icon(Icons.badge_outlined, size: 14, color: AppColors.gray400),
-                                                      const SizedBox(width: 4),
-                                                      Expanded(
-                                                        child: Text(
-                                                          '${_getRoleLabel(_mrRoles[report.mrId] ?? 'MR')}: ${report.mrName}',
-                                                          style: const TextStyle(
-                                                            color: AppColors.gray600,
-                                                            fontSize: 12,
-                                                          ),
-                                                          overflow: TextOverflow.ellipsis,
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
                                                   const SizedBox(height: 2),
                                                   Row(
                                                     children: [
@@ -1036,13 +1274,37 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                       ),
                     ),
                     const SizedBox(height: 8),
-                      Text(
-                        report.mrName,
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.9),
-                          fontSize: 14,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                      // For Triple visit, show both DM and MR names
+                      if (report.typeOfVisit == 'Triple' && report.dmName.isNotEmpty && report.mrName.isNotEmpty)
+                        Column(
+                          children: [
+                            Text(
+                              '${report.dmName} & ${report.mrName}',
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.9),
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'District Manager & Medical Rep',
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.8),
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        )
+                      else
+                        Text(
+                          report.mrName,
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.9),
+                            fontSize: 14,
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         maxLines: 1,
                       ),
                   ],
@@ -1112,8 +1374,24 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                         [
                           _buildModalInfoItem('Date', report.date),
                           _buildModalInfoItem('Average Score', '${avgScore.toStringAsFixed(2)} / 6.0'),
-                          _buildModalInfoItem('Coach Role', '${_getCoachRoleLabel(report.coachRole)}: ${report.dmName}'),
-                          _buildModalInfoItem('Coached Person Role', '${_getRoleLabel(_mrRoles[report.mrId] ?? 'MR')}: ${report.mrName}'),
+                          // Show Coach Role with actual coach name (fetch from Supabase)
+                          FutureBuilder<String?>(
+                            future: _getCoachName(_getCoachIdFromReport(report), report.coachRole),
+                            builder: (context, snapshot) {
+                              final coachName = snapshot.data ?? 'Loading...';
+                              final coachRole = report.coachRole ?? 'pm';
+                              final roleLabel = _getCoachRoleLabel(coachRole);
+                              return _buildModalInfoItem('Coach Role', '$roleLabel: $coachName');
+                            },
+                          ),
+                          // For Triple visit, show both DM and MR
+                          if (report.typeOfVisit == 'Triple' && report.dmName.isNotEmpty && report.mrName.isNotEmpty) ...[
+                            _buildModalInfoItem('District Manager', report.dmName),
+                            _buildModalInfoItem('Medical Rep', report.mrName),
+                          ] else
+                            _buildModalInfoItem('Coached Person Role', '${_getRoleLabel(_mrRoles[report.mrId] ?? 'MR')}: ${report.mrName}'),
+                          if (report.typeOfVisit != null)
+                            _buildModalInfoItem('Type of Visit', report.typeOfVisit!),
                           if (report.isQuickSession == true)
                             _buildModalInfoItem('Session Type', 'Quick Session (No Plan)'),
                         ],
@@ -1344,8 +1622,8 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                               ),
                           ],
                         ),
-                        // DM Feedback - Only for DM reports in Triple Visit
-                        if (_isDMReport(report)) ...[
+                        // DM Feedback - Show for DM reports or Triple visits (which contain both DM and MR feedback)
+                        if (_isDMReport(report) || report.typeOfVisit == 'Triple') ...[
                           const SizedBox(height: 24),
                           _buildModalSection(
                             'DM Feedback',
@@ -1389,8 +1667,8 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                             ],
                           ),
                         ],
-                        // MR Feedback - Only for MR reports
-                        if (!_isDMReport(report)) ...[
+                        // MR Feedback - Show for MR reports or Triple visits (which contain both DM and MR feedback)
+                        if (!_isDMReport(report) || report.typeOfVisit == 'Triple') ...[
                           const SizedBox(height: 24),
                           _buildModalSection(
                             'MR Feedback',

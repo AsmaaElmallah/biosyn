@@ -3,17 +3,14 @@ import 'package:biosyn_report_flutter/widgets/logo_widget.dart';
 import 'package:biosyn_report_flutter/theme/colors.dart';
 import 'package:biosyn_report_flutter/services/supabase_service.dart';
 import 'package:biosyn_report_flutter/utils/responsive.dart';
+import 'package:biosyn_report_flutter/utils/error_handler.dart';
 
 class LoginScreen extends StatefulWidget {
-  final String role;
   final Function(String, String) onLogin;
-  final VoidCallback onBack;
 
   const LoginScreen({
     super.key,
-    required this.role,
     required this.onLogin,
-    required this.onBack,
   });
 
   @override
@@ -27,18 +24,6 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   String? _error;
 
-  String get _roleTitle {
-    switch (widget.role.toLowerCase()) {
-      case 'dm':
-        return 'District Manager / Field Trainer';
-      case 'pm':
-        return 'Product Manager / Medical Science Liaison';
-      case 'gm':
-        return 'General Manager';
-      default:
-        return 'Login';
-    }
-  }
 
   Future<void> _handleLogin() async {
     setState(() {
@@ -56,52 +41,40 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     try {
-      // Supabase authentication (no offline fallback here)
-      final user = await SupabaseService.signIn(
-        _usernameController.text.trim(),
-        _passwordController.text,
+      // Supabase authentication with retry
+      await RetryHandler.executeWithRetry(
+        maxRetries: 2,
+        initialDelay: 1,
+        function: () async {
+          await SupabaseService.signIn(
+            _usernameController.text.trim(),
+            _passwordController.text,
+          );
+        },
       );
 
-      // Role validation: تأكيد إن اليوزر داخل من الزر الصح
-      final role = (user['role'] ?? '').toString().toLowerCase();
-      final expectedRole = widget.role.toLowerCase(); // 'dm', 'pm', أو 'gm'
-
-      // DM/FT can use same login button
-      if (expectedRole == 'dm' && role != 'dm' && role != 'ft') {
-        setState(() {
-          _error = 'This account is not a District Manager or Field Trainer';
-        });
-        return;
-      }
-      
-      // PM/MSL can use same login button
-      if (expectedRole == 'pm' && role != 'pm' && role != 'msl') {
-        setState(() {
-          _error = 'This account is not a Product Manager or Medical Science Liaison';
-        });
-        return;
-      }
-      
-      // GM must be GM only
-      if (expectedRole == 'gm' && role != 'gm') {
-        setState(() {
-          _error = 'This account is not a General Manager';
-        });
-        return;
-      }
-
       // If successful, proceed with app login/navigation
+      // The role will be determined automatically from the user data
       if (mounted) {
         widget.onLogin(
           _usernameController.text.trim(),
           _passwordController.text,
         );
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      ErrorHandler.logError(e, context: 'LoginScreen._handleLogin', stackTrace: stackTrace);
       if (mounted) {
         setState(() {
-          // للبساطة: أي خطأ من Supabase نعرضه كـ Invalid credentials
-          _error = 'Invalid username or password';
+          // Display user-friendly error message
+          final errorString = e.toString().toLowerCase();
+          if (errorString.contains('invalid') || 
+              errorString.contains('password') || 
+              errorString.contains('credentials') ||
+              errorString.contains('401')) {
+            _error = 'اسم المستخدم أو كلمة المرور غير صحيحة';
+          } else {
+            _error = ErrorHandler.getUserFriendlyMessage(e);
+          }
         });
       }
     } finally {
@@ -150,38 +123,14 @@ class _LoginScreenState extends State<LoginScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Back Button
-                    InkWell(
-                      onTap: widget.onBack,
-                      child: Padding(
-                        padding: const EdgeInsets.only(bottom: 24),
-                        child: Row(
-                          children: [
-                            const Icon(
-                              Icons.arrow_back,
-                              color: AppColors.gray600,
-                              size: 20,
-                            ),
-                            const SizedBox(width: 8),
-                            const Text(
-                              'Back',
-                              style: TextStyle(
-                                color: AppColors.gray600,
-                                fontSize: 16,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
                     // Logo
                     const LogoWidget(size: 200, showText: true),
                     const SizedBox(height: 24),
                     // Title
-                    Text(
-                      _roleTitle,
+                    const Text(
+                      'Welcome Back',
                       textAlign: TextAlign.center,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: AppColors.primaryBlue,
                         fontSize: 24,
                         fontWeight: FontWeight.bold,

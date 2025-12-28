@@ -6,6 +6,7 @@ import 'package:biosyn_report_flutter/widgets/app_header.dart';
 import 'package:intl/intl.dart';
 import 'package:biosyn_report_flutter/services/supabase_service.dart';
 import 'package:biosyn_report_flutter/services/connectivity_service.dart';
+import 'package:biosyn_report_flutter/utils/error_handler.dart';
 
 class GMViewPlansScreen extends StatefulWidget {
   final String activeTab;
@@ -31,6 +32,11 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
   
   // Current month for filtering
   DateTime _selectedMonth = DateTime.now();
+  
+  // Date range for filtering
+  DateTime? _startDate;
+  DateTime? _endDate;
+  bool _useDateRange = false;
 
   // Colors for different DMs
   final List<Color> _colorPalette = [
@@ -100,13 +106,16 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
     return _coachProfilePictures[cleanName];
   }
 
-  Future<void> _loadData() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
+  Future<void> _loadData({bool isRetry = false}) async {
+    if (!isRetry) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    }
     
     try {
+      // Check connectivity
       final isConnected = await ConnectivityService.isConnected();
       debugPrint('📅 GMViewPlansScreen._loadData()');
       debugPrint('   Is connected: $isConnected');
@@ -114,7 +123,7 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
       
       if (!isConnected) {
         setState(() {
-          _errorMessage = 'No internet connection. Please check your network.';
+          _errorMessage = ErrorHandler.getUserFriendlyMessage('No internet connection');
           _isLoading = false;
         });
         return;
@@ -122,41 +131,58 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
       
       if (!SupabaseService.isInitialized) {
         setState(() {
-          _errorMessage = 'Supabase is not initialized.';
+          _errorMessage = ErrorHandler.getUserFriendlyMessage('Supabase is not initialized');
           _isLoading = false;
         });
         return;
       }
       
-      // Fetch all coaches (DM, FT, PM, MSL) and Plans from Supabase
-      final dms = await SupabaseService.getAllDMs();
-      final fts = await SupabaseService.getAllFTs();
-      final pms = await SupabaseService.getAllPMs();
-      final msls = await SupabaseService.getAllMSLs();
-      final plans = await SupabaseService.getAllPlans();
+      // Fetch data with automatic retry
+      await RetryHandler.executeWithRetry(
+        maxRetries: 3,
+        initialDelay: 1,
+        maxDelay: 5,
+        onRetry: (attempt, delay) {
+          debugPrint('   🔄 Retrying... (Attempt $attempt/3)');
+        },
+        function: () async {
+          // Fetch all coaches (DM, FT, PM, MSL) and Plans from Supabase
+          final dms = await SupabaseService.getAllDMs();
+          final fts = await SupabaseService.getAllFTs();
+          final pms = await SupabaseService.getAllPMs();
+          final msls = await SupabaseService.getAllMSLs();
+          final plans = await SupabaseService.getAllPlans();
+          
+          // Combine all coaches
+          final allCoaches = [
+            ...dms.map((dm) => {...dm, 'role': 'dm'}),
+            ...fts.map((ft) => {...ft, 'role': 'ft'}),
+            ...pms.map((pm) => {...pm, 'role': 'pm'}),
+            ...msls.map((msl) => {...msl, 'role': 'msl'}),
+          ];
+          
+          debugPrint('   ✅ Loaded ${allCoaches.length} Coaches (${dms.length} DMs, ${fts.length} FTs, ${pms.length} PMs, ${msls.length} MSLs)');
+          debugPrint('   ✅ Loaded ${plans.length} Plans');
+          
+          if (mounted) {
+            setState(() {
+              _allDMs = allCoaches;
+              _allPlans = plans;
+              _isLoading = false;
+              _errorMessage = null;
+            });
+          }
+        },
+      );
+    } catch (e, stackTrace) {
+      ErrorHandler.logError(e, context: 'GMViewPlansScreen._loadData', stackTrace: stackTrace);
       
-      // Combine all coaches
-      final allCoaches = [
-        ...dms.map((dm) => {...dm, 'role': 'dm'}),
-        ...fts.map((ft) => {...ft, 'role': 'ft'}),
-        ...pms.map((pm) => {...pm, 'role': 'pm'}),
-        ...msls.map((msl) => {...msl, 'role': 'msl'}),
-      ];
-      
-      debugPrint('   ✅ Loaded ${allCoaches.length} Coaches (${dms.length} DMs, ${fts.length} FTs, ${pms.length} PMs, ${msls.length} MSLs)');
-      debugPrint('   ✅ Loaded ${plans.length} Plans');
-      
-      setState(() {
-        _allDMs = allCoaches;
-        _allPlans = plans;
-        _isLoading = false;
-      });
-    } catch (e) {
-      debugPrint('   ❌ Error: $e');
-      setState(() {
-        _errorMessage = 'Failed to load data: ${e.toString()}';
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _errorMessage = ErrorHandler.getUserFriendlyMessage(e);
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -193,19 +219,37 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
       plans = plans.where((p) => p['dm_id'] == _selectedDMId).toList();
     }
     
-    // Filter by selected month
-    final monthStart = DateTime(_selectedMonth.year, _selectedMonth.month, 1);
-    final monthEnd = DateTime(_selectedMonth.year, _selectedMonth.month + 1, 0);
-    
-    plans = plans.where((p) {
-      try {
-        final planDate = DateTime.parse(p['date']);
-        return planDate.isAfter(monthStart.subtract(const Duration(days: 1))) &&
-               planDate.isBefore(monthEnd.add(const Duration(days: 1)));
-      } catch (e) {
-        return false;
-      }
-    }).toList();
+    // Filter by date range or month
+    if (_useDateRange && _startDate != null && _endDate != null) {
+      // Filter by date range
+      plans = plans.where((p) {
+        try {
+          final planDate = DateTime.parse(p['date']);
+          final planDateOnly = DateTime(planDate.year, planDate.month, planDate.day);
+          final startOnly = DateTime(_startDate!.year, _startDate!.month, _startDate!.day);
+          final endOnly = DateTime(_endDate!.year, _endDate!.month, _endDate!.day);
+          return planDateOnly.isAtSameMomentAs(startOnly) || 
+                 planDateOnly.isAtSameMomentAs(endOnly) ||
+                 (planDateOnly.isAfter(startOnly) && planDateOnly.isBefore(endOnly));
+        } catch (e) {
+          return false;
+        }
+      }).toList();
+    } else {
+      // Filter by selected month
+      final monthStart = DateTime(_selectedMonth.year, _selectedMonth.month, 1);
+      final monthEnd = DateTime(_selectedMonth.year, _selectedMonth.month + 1, 0);
+      
+      plans = plans.where((p) {
+        try {
+          final planDate = DateTime.parse(p['date']);
+          return planDate.isAfter(monthStart.subtract(const Duration(days: 1))) &&
+                 planDate.isBefore(monthEnd.add(const Duration(days: 1)));
+        } catch (e) {
+          return false;
+        }
+      }).toList();
+    }
     
     // Sort by date
     plans.sort((a, b) {
@@ -279,8 +323,8 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                // Month Selector
-                                _buildMonthSelector(),
+                                // Month Selector / Date Range Selector
+                                _buildDateSelector(),
                                 const SizedBox(height: 16),
                                 
                                 // Filter by DM
@@ -326,9 +370,9 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
     );
   }
 
-  Widget _buildMonthSelector() {
+  Widget _buildDateSelector() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
@@ -340,25 +384,245 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
           ),
         ],
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          IconButton(
-            onPressed: _previousMonth,
-            icon: const Icon(Icons.chevron_left, color: AppColors.primaryBlue),
+          Row(
+            children: [
+              const Icon(Icons.date_range, color: AppColors.primaryBlue, size: 20),
+              const SizedBox(width: 8),
+              const Text(
+                'Filter by Date',
+                style: TextStyle(
+                  color: AppColors.gray700,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
           ),
-          Text(
-            DateFormat('MMMM yyyy').format(_selectedMonth),
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: AppColors.gray700,
+          const SizedBox(height: 12),
+          // Toggle between Month and Date Range
+          Row(
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _useDateRange = false;
+                    });
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: !_useDateRange ? AppColors.primaryBlue.withOpacity(0.1) : AppColors.gray50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: !_useDateRange ? AppColors.primaryBlue : AppColors.gray200,
+                        width: !_useDateRange ? 2 : 1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.calendar_month,
+                          size: 16,
+                          color: !_useDateRange ? AppColors.primaryBlue : AppColors.gray600,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Month',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: !_useDateRange ? FontWeight.w600 : FontWeight.normal,
+                            color: !_useDateRange ? AppColors.primaryBlue : AppColors.gray600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _useDateRange = true;
+                    });
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: _useDateRange ? AppColors.primaryBlue.withOpacity(0.1) : AppColors.gray50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: _useDateRange ? AppColors.primaryBlue : AppColors.gray200,
+                        width: _useDateRange ? 2 : 1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.date_range,
+                          size: 16,
+                          color: _useDateRange ? AppColors.primaryBlue : AppColors.gray600,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Date Range',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: _useDateRange ? FontWeight.w600 : FontWeight.normal,
+                            color: _useDateRange ? AppColors.primaryBlue : AppColors.gray600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Month selector or Date range selector
+          if (!_useDateRange)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                IconButton(
+                  onPressed: _previousMonth,
+                  icon: const Icon(Icons.chevron_left, color: AppColors.primaryBlue),
+                ),
+                Text(
+                  DateFormat('MMMM yyyy').format(_selectedMonth),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.gray700,
+                  ),
+                ),
+                IconButton(
+                  onPressed: _nextMonth,
+                  icon: const Icon(Icons.chevron_right, color: AppColors.primaryBlue),
+                ),
+              ],
+            )
+          else
+            Column(
+              children: [
+                // Start Date
+                GestureDetector(
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: _startDate ?? DateTime.now(),
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime(2100),
+                    );
+                    if (picked != null) {
+                      setState(() {
+                        _startDate = picked;
+                        if (_endDate != null && _endDate!.isBefore(_startDate!)) {
+                          _endDate = null;
+                        }
+                      });
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: AppColors.gray50,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.gray200),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_today, size: 18, color: AppColors.gray600),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            _startDate != null
+                                ? DateFormat('MMM dd, yyyy').format(_startDate!)
+                                : 'Start Date',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: _startDate != null ? AppColors.gray900 : AppColors.gray400,
+                              fontWeight: _startDate != null ? FontWeight.w500 : FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                        const Icon(Icons.arrow_drop_down, color: AppColors.gray600),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                // End Date
+                GestureDetector(
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: _endDate ?? _startDate ?? DateTime.now(),
+                      firstDate: _startDate ?? DateTime(2020),
+                      lastDate: DateTime(2100),
+                    );
+                    if (picked != null) {
+                      setState(() {
+                        _endDate = picked;
+                      });
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: AppColors.gray50,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.gray200),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_today, size: 18, color: AppColors.gray600),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            _endDate != null
+                                ? DateFormat('MMM dd, yyyy').format(_endDate!)
+                                : 'End Date',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: _endDate != null ? AppColors.gray900 : AppColors.gray400,
+                              fontWeight: _endDate != null ? FontWeight.w500 : FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                        const Icon(Icons.arrow_drop_down, color: AppColors.gray600),
+                      ],
+                    ),
+                  ),
+                ),
+                // Clear button
+                if (_startDate != null || _endDate != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: TextButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _startDate = null;
+                          _endDate = null;
+                        });
+                      },
+                      icon: const Icon(Icons.clear, size: 16),
+                      label: const Text('Clear'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.gray600,
+                      ),
+                    ),
+                  ),
+              ],
             ),
-          ),
-          IconButton(
-            onPressed: _nextMonth,
-            icon: const Icon(Icons.chevron_right, color: AppColors.primaryBlue),
-          ),
         ],
       ),
     );
@@ -892,7 +1156,7 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
             ),
             const SizedBox(height: 16),
             Text(
-              _errorMessage ?? 'An error occurred',
+              _errorMessage ?? 'حدث خطأ غير متوقع. يرجى المحاولة مرة أخرى.',
               style: const TextStyle(
                 fontSize: 16,
                 color: AppColors.gray700,
@@ -901,9 +1165,9 @@ class _GMViewPlansScreenState extends State<GMViewPlansScreen> {
             ),
             const SizedBox(height: 24),
             ElevatedButton.icon(
-              onPressed: _loadData,
+              onPressed: () => _loadData(isRetry: true),
               icon: const Icon(Icons.refresh),
-              label: const Text('Retry'),
+              label: const Text('إعادة المحاولة'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primaryBlue,
                 foregroundColor: Colors.white,

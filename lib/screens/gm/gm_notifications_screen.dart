@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:biosyn_report_flutter/theme/colors.dart';
 import 'package:biosyn_report_flutter/theme/text_styles.dart';
 import 'package:biosyn_report_flutter/theme/spacing.dart';
@@ -8,6 +9,7 @@ import 'package:biosyn_report_flutter/widgets/loading_states.dart';
 import 'package:biosyn_report_flutter/services/supabase_service.dart';
 import 'package:biosyn_report_flutter/utils/responsive.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class GMNotificationsScreen extends StatefulWidget {
   final String gmId;
@@ -128,6 +130,94 @@ class _GMNotificationsScreenState extends State<GMNotificationsScreen> {
       default:
         return Icons.notifications;
     }
+  }
+
+  /// Build message with clickable links
+  Widget _buildMessageWithLinks(String message, {required bool isRead}) {
+    // Regular expression to match URLs
+    final urlRegex = RegExp(r'https?://[^\s]+');
+    final matches = urlRegex.allMatches(message);
+    
+    if (matches.isEmpty) {
+      // No URLs found, return regular text
+      return Text(
+        message,
+        style: AppTextStyles.bodyMedium.copyWith(
+          color: AppColors.gray700,
+          fontWeight: isRead ? FontWeight.normal : FontWeight.w500,
+        ),
+        maxLines: 10,
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+    
+    // Build TextSpans with clickable links
+    final spans = <TextSpan>[];
+    int currentPosition = 0;
+    
+    for (final match in matches) {
+      // Add text before the URL
+      if (match.start > currentPosition) {
+        spans.add(TextSpan(
+          text: message.substring(currentPosition, match.start),
+          style: AppTextStyles.bodyMedium.copyWith(
+            color: AppColors.gray700,
+            fontWeight: isRead ? FontWeight.normal : FontWeight.w500,
+          ),
+        ));
+      }
+      
+      // Add clickable URL
+      final url = message.substring(match.start, match.end);
+      spans.add(TextSpan(
+        text: url,
+        style: AppTextStyles.bodyMedium.copyWith(
+          color: AppColors.primaryBlue,
+          fontWeight: FontWeight.w600,
+          decoration: TextDecoration.underline,
+        ),
+        recognizer: TapGestureRecognizer()
+          ..onTap = () async {
+            try {
+              final uri = Uri.parse(url);
+              if (await canLaunchUrl(uri)) {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              } else {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Cannot open this link')),
+                  );
+                }
+              }
+            } catch (e) {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Error opening link: $e')),
+                );
+              }
+            }
+          },
+      ));
+      
+      currentPosition = match.end;
+    }
+    
+    // Add remaining text after the last URL
+    if (currentPosition < message.length) {
+      spans.add(TextSpan(
+        text: message.substring(currentPosition),
+        style: AppTextStyles.bodyMedium.copyWith(
+          color: AppColors.gray700,
+          fontWeight: isRead ? FontWeight.normal : FontWeight.w500,
+        ),
+      ));
+    }
+    
+    return RichText(
+      text: TextSpan(children: spans),
+      maxLines: 10,
+      overflow: TextOverflow.ellipsis,
+    );
   }
 
   @override
@@ -281,17 +371,12 @@ class _GMNotificationsScreenState extends State<GMNotificationsScreen> {
                                                       ],
                                                     ),
                                                     AppSpacing.vertical(AppSpacing.xs),
-                                                    // Message - Show the full message about time change
-                                                    Text(
+                                                    // Message - Show the full message with clickable links
+                                                    _buildMessageWithLinks(
                                                       message.isNotEmpty 
                                                           ? message 
                                                           : '${senderName} (${_getRoleLabel(senderRole)}) changed the device time/date while submitting a coaching session',
-                                                      style: AppTextStyles.bodyMedium.copyWith(
-                                                        color: AppColors.gray700,
-                                                        fontWeight: isRead ? FontWeight.normal : FontWeight.w500,
-                                                      ),
-                                                      maxLines: 4,
-                                                      overflow: TextOverflow.ellipsis,
+                                                      isRead: isRead,
                                                     ),
                                                     AppSpacing.vertical(AppSpacing.sm),
                                                     // Footer

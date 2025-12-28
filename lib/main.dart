@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:biosyn_report_flutter/theme/theme.dart';
 import 'package:biosyn_report_flutter/screens/splash_screen.dart';
-import 'package:biosyn_report_flutter/screens/welcome_screen.dart';
 import 'package:biosyn_report_flutter/screens/login_screen.dart';
 import 'package:biosyn_report_flutter/screens/dm/dm_planning_screen.dart';
 import 'package:biosyn_report_flutter/screens/dm/dm_dashboard_screen.dart';
@@ -402,84 +401,48 @@ class _AppNavigatorState extends State<AppNavigator> {
 
   void _handleSplashComplete() {
     setState(() {
-      _currentScreen = 'welcome';
-    });
-  }
-
-  void _handleRoleSelect(String role) {
-    setState(() {
-      _selectedRole = role;
       _currentScreen = 'login';
     });
   }
 
   Future<void> _handleLogin(String username, String password) async {
     try {
-      // Use AuthService for authentication
-      final user = await AuthService.signIn(username, password);
+      // Use SupabaseService for authentication
+      final user = await SupabaseService.signIn(username, password);
       
       setState(() {
         _userName = user['name'] as String? ?? username;
         _userId = user['id']?.toString();
         final userRole = user['role'] as String?;
         
-        // Update selected role based on actual user role
+        // Update selected role based on actual user role from database
         if (userRole != null) {
           _selectedRole = userRole;
         }
         
-        // Determine screen based on role
-        if (userRole == 'dm' || userRole == 'ft' || _selectedRole == 'dm') {
+        // Determine screen based on role automatically
+        if (userRole == 'dm' || userRole == 'ft') {
           _currentScreen = 'dm-planning';
           _activeTab = 'planning';
-        } else if (userRole == 'pm' || userRole == 'msl' || _selectedRole == 'pm') {
+        } else if (userRole == 'pm' || userRole == 'msl') {
           _currentScreen = 'pm-planning';
           _activeTab = 'planning';
-        } else if (userRole == 'gm' || _selectedRole == 'gm') {
+        } else if (userRole == 'gm') {
           _currentScreen = 'gm-dashboard';
           _activeTab = 'dashboard';
         } else {
-          // Default based on selected role
-          if (_selectedRole == 'dm') {
-            _currentScreen = 'dm-planning';
-            _activeTab = 'planning';
-          } else if (_selectedRole == 'pm') {
-            _currentScreen = 'pm-planning';
-            _activeTab = 'planning';
-          } else {
-            _currentScreen = 'gm-dashboard';
-            _activeTab = 'dashboard';
-          }
+          // Default fallback (should not happen if database is correct)
+          _currentScreen = 'login';
         }
       });
       
       // After login, reload reports (will fetch from Supabase if online)
       await _loadReports();
     } catch (e) {
-      // Fallback to local authentication if Supabase fails
-      // This allows the app to work even without Supabase configured
-      setState(() {
-        _userName = username;
-        _userId = null; // No user ID for offline mode
-        if (_selectedRole == 'dm') {
-          _currentScreen = 'dm-planning';
-          _activeTab = 'planning';
-        } else if (_selectedRole == 'pm') {
-          _currentScreen = 'pm-planning';
-          _activeTab = 'planning';
-        } else {
-          _currentScreen = 'gm-dashboard';
-          _activeTab = 'dashboard';
-        }
-      });
+      // Authentication failed - stay on login screen
+      // Error will be shown by LoginScreen
+      debugPrint('Login failed: $e');
     }
-  }
-
-  void _handleBackToWelcome() {
-    setState(() {
-      _currentScreen = 'welcome';
-      _selectedRole = null;
-    });
   }
 
   void _handleTabChange(String tab) {
@@ -533,7 +496,7 @@ class _AppNavigatorState extends State<AppNavigator> {
 
   void _handleLogout() {
     setState(() {
-      _currentScreen = 'welcome';
+      _currentScreen = 'login';
       _selectedRole = null;
       _userName = '';
       _userId = null;
@@ -546,13 +509,9 @@ class _AppNavigatorState extends State<AppNavigator> {
     switch (_currentScreen) {
       case 'splash':
         return SplashScreen(onComplete: _handleSplashComplete);
-      case 'welcome':
-        return WelcomeScreen(onSelectRole: _handleRoleSelect);
       case 'login':
         return LoginScreen(
-          role: _selectedRole!,
           onLogin: _handleLogin,
-          onBack: _handleBackToWelcome,
         );
       case 'dm-planning':
         return DMPlanningScreen(

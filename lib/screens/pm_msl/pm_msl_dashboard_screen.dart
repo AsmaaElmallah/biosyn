@@ -47,6 +47,7 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
   Set<String> _mrIds = {}; // Set of MR IDs from users table
   Set<String> _dmIds = {}; // Set of DM IDs from users table
   Map<String, String> _personRoles = {}; // Map of person ID -> role from Supabase (mr, dm, ft, etc.)
+  Map<String, String?> _coachNames = {}; // Map of coach ID -> coach name from users table
   
   // Loading and error states
   bool _isLoadingProfiles = true;
@@ -73,10 +74,65 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
       await Future.wait([
         _loadMRProfiles(),
         _loadDMRoles(),
+        _loadCoachNames(),
       ], eagerError: false); // Don't stop on first error
     } catch (e) {
       debugPrint('❌ Error initializing data: $e');
       // Errors are handled individually in each function
+    }
+  }
+
+  /// Load coach names from users table
+  Future<void> _loadCoachNames() async {
+    try {
+      debugPrint('👤 Loading coach names...');
+      debugPrint('   coachRole: ${widget.coachRole}');
+      debugPrint('   coachId: ${widget.coachId}');
+      
+      // Load coaches based on role
+      List<Map<String, dynamic>> coaches = [];
+      if (widget.coachRole == 'pm') {
+        coaches = await SupabaseService.getAllPMs();
+      } else if (widget.coachRole == 'msl') {
+        coaches = await SupabaseService.getAllMSLs();
+      }
+      
+      final coachNamesMap = <String, String?>{};
+      for (final coach in coaches) {
+        final id = (coach['id'] ?? '').toString();
+        final name = (coach['name'] ?? '').toString();
+        if (id.isNotEmpty && name.isNotEmpty) {
+          coachNamesMap[id] = name;
+          debugPrint('   📝 Loaded coach: id=$id, name=$name');
+        }
+      }
+      
+      // Also load the current coach's name if coachId is provided
+      if (widget.coachId != null && widget.coachId!.isNotEmpty) {
+        try {
+          final user = await SupabaseService.getUserById(widget.coachId!);
+          if (user != null) {
+            final id = (user['id'] ?? '').toString();
+            final name = (user['name'] ?? '').toString();
+            final role = (user['role'] ?? '').toString();
+            if (id.isNotEmpty && name.isNotEmpty) {
+              coachNamesMap[id] = name;
+              debugPrint('   ✅ Loaded current coach: id=$id, name=$name, role=$role');
+            }
+          }
+        } catch (e) {
+          debugPrint('   ⚠️ Error loading current coach name: $e');
+        }
+      }
+      
+      debugPrint('   ✅ Loaded ${coachNamesMap.length} coach names total');
+      if (mounted) {
+        setState(() {
+          _coachNames = coachNamesMap;
+        });
+      }
+    } catch (e) {
+      debugPrint('   ❌ Error loading coach names: $e');
     }
   }
 
@@ -341,10 +397,21 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
       }
     }).toList();
 
-    // Filter only MR reports (exclude DM reports from Triple Visit)
-    final mrReports = thisMonthReports.where((r) => !_isDMReport(r)).toList();
+    // 1. Total Coaching Sessions: Count all reports (Single + Double + Triple)
+    // Each report = 1 session, regardless of type
+    final totalVisits = thisMonthReports.length;
 
-    // Calculate average score only from MR reports
+    // 2. Average Score: Calculate only from MR reports (Double with MR or Triple)
+    // Exclude Single visits and DM reports from Double visits
+    final mrReports = thisMonthReports.where((r) {
+      // Include MR reports from Double (with MR) or Triple visits
+      // Exclude Single visits and DM reports from Double visits
+      if (r.typeOfVisit == 'Single') return false;
+      if (r.typeOfVisit == 'Double' && _isDMReport(r)) return false; // Exclude DM reports from Double
+      if (r.typeOfVisit == 'Triple' && _isDMReport(r)) return false; // Exclude DM reports from Triple
+      return !_isDMReport(r); // Include only MR reports
+    }).toList();
+
     final allScores = mrReports
         .map((r) => r.getAverageScore())
         .where((s) => s > 0)
@@ -353,21 +420,34 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
         ? 0.0
         : allScores.reduce((a, b) => a + b) / allScores.length;
 
-    // Count unique MRs only from MR reports
+    // 3. Total MRs Coached: Count unique MRs from Double (with MR) or Triple visits
     final uniqueMRs = mrReports.map((r) => r.mrId).where((id) => id.isNotEmpty).toSet().length;
     
-    // Count unique DMs from DM reports (Triple Visit)
-    final dmReports = thisMonthReports.where((r) => _isDMReport(r)).toList();
-    final uniqueDMs = dmReports.map((r) => r.mrId).where((id) => id.isNotEmpty).toSet().length;
-
-    // Calculate total coaching sessions: Sum of unique MRs and unique DMs
-    final totalVisits = uniqueMRs + uniqueDMs;
+    // 4. Total DMs Coached: Count unique DMs from Double (with DM) or Triple visits
+    // For Triple visits, use dmId (which contains the coached DM's ID)
+    // For Double visits with DM, use mrId (which contains the coached DM's ID in this case)
+    final uniqueDMs = <String>{};
+    for (final report in thisMonthReports) {
+      if (report.typeOfVisit == 'Single') continue;
+      
+      if (report.typeOfVisit == 'Triple') {
+        // For Triple visits, dmId contains the coached DM's ID
+        if (report.dmId.isNotEmpty) {
+          uniqueDMs.add(report.dmId);
+        }
+      } else if (_isDMReport(report)) {
+        // For Double visits with DM, mrId contains the coached DM's ID
+        if (report.mrId.isNotEmpty) {
+          uniqueDMs.add(report.mrId);
+        }
+      }
+    }
 
     return {
       'totalVisitsThisMonth': totalVisits, // Sum of MRs Coached + DMs Coached
       'averageScore': avgScore,
       'totalMRsCoached': uniqueMRs,
-      'totalDMsCoached': uniqueDMs,
+      'totalDMsCoached': uniqueDMs.length, // Return the count, not the set
     };
   }
 
@@ -382,6 +462,8 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
       
       final visitsCount = reports.where((r) {
         if (r.date.isEmpty) return false;
+        // Exclude Single visits - only count visits with actual MR or DM
+        if (r.typeOfVisit == 'Single') return false;
         try {
           final reportDate = DateTime.parse(r.date);
           return reportDate.month == date.month && reportDate.year == date.year;
@@ -406,29 +488,76 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
     final performanceStats = <String, Map<String, dynamic>>{};
 
     for (final report in reports) {
-      // Only process MR reports (exclude DM reports from Triple Visit)
-      if (report.mrId.isNotEmpty && report.mrName.isNotEmpty && !_isDMReport(report)) {
-        final key = 'mr_${report.mrId}';
-        if (!performanceStats.containsKey(key)) {
-          performanceStats[key] = {
-            'id': report.mrId,
-            'name': report.mrName,
-            'role': 'MR',
-            'visitCount': 0,
-            'totalScore': 0.0,
-            'reports': <CoachingReport>[],
-          };
+      // Exclude Single visits (they don't have actual MR or DM)
+      if (report.typeOfVisit == 'Single') continue;
+      
+      // For Triple visits: process both MR and DM separately
+      if (report.typeOfVisit == 'Triple') {
+        // Process MR from Triple visit
+        if (report.mrId.isNotEmpty && report.mrName.isNotEmpty) {
+          final mrKey = 'mr_${report.mrId}';
+          if (!performanceStats.containsKey(mrKey)) {
+            performanceStats[mrKey] = {
+              'id': report.mrId,
+              'name': report.mrName,
+              'role': 'MR',
+              'visitCount': 0,
+              'totalScore': 0.0,
+              'reports': <CoachingReport>[],
+            };
+          }
+          performanceStats[mrKey]!['visitCount'] = (performanceStats[mrKey]!['visitCount'] as int) + 1;
+          performanceStats[mrKey]!['reports'].add(report);
         }
-        performanceStats[key]!['visitCount'] = (performanceStats[key]!['visitCount'] as int) + 1;
-        performanceStats[key]!['reports'].add(report);
+        
+        // Process DM from Triple visit
+        if (report.dmId.isNotEmpty && report.dmName.isNotEmpty) {
+          final dmKey = 'dm_${report.dmId}';
+          if (!performanceStats.containsKey(dmKey)) {
+            performanceStats[dmKey] = {
+              'id': report.dmId,
+              'name': report.dmName,
+              'role': 'DM',
+              'visitCount': 0,
+              'totalScore': 0.0,
+              'reports': <CoachingReport>[],
+            };
+          }
+          performanceStats[dmKey]!['visitCount'] = (performanceStats[dmKey]!['visitCount'] as int) + 1;
+          performanceStats[dmKey]!['reports'].add(report);
+        }
+      } else {
+        // For Double visits: process MR or DM reports
+        if (report.mrId.isNotEmpty && report.mrName.isNotEmpty) {
+          final isDMReport = _isDMReport(report);
+          final role = isDMReport ? 'DM' : 'MR';
+          final key = '${role.toLowerCase()}_${report.mrId}';
+          
+          if (!performanceStats.containsKey(key)) {
+            performanceStats[key] = {
+              'id': report.mrId,
+              'name': report.mrName,
+              'role': role,
+              'visitCount': 0,
+              'totalScore': 0.0,
+              'reports': <CoachingReport>[],
+            };
+          }
+          performanceStats[key]!['visitCount'] = (performanceStats[key]!['visitCount'] as int) + 1;
+          performanceStats[key]!['reports'].add(report);
+        }
       }
     }
 
     return performanceStats.values.map((stats) {
       final reports = stats['reports'] as List<CoachingReport>;
+      final personRole = stats['role'] as String;
+      final isDM = personRole == 'DM';
       
-      // Calculate score for MR reports only
-      final scores = reports.map((r) => r.getAverageScore()).where((s) => s > 0).toList();
+      // Calculate score - use getDMScore() for DM reports, getAverageScore() for MR reports
+      final scores = reports.map((r) {
+        return isDM ? r.getDMScore() : r.getAverageScore();
+      }).where((s) => s > 0).toList();
       
       final avgScore = scores.isEmpty
           ? 0.0
@@ -467,18 +596,55 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
     final personReports = <String, Map<String, dynamic>>{};
     
     for (final report in thisMonthReports) {
-      // Only process MR reports (exclude DM reports from Triple Visit)
-      if (report.mrId.isNotEmpty && report.mrName.isNotEmpty && !_isDMReport(report)) {
-        final key = 'mr_${report.mrId}';
-        if (!personReports.containsKey(key)) {
-          personReports[key] = {
-            'id': report.mrId,
-            'name': report.mrName,
-            'role': 'MR',
-            'reports': <CoachingReport>[],
-          };
+      // Exclude Single visits (they don't have actual MR or DM)
+      if (report.typeOfVisit == 'Single') continue;
+      
+      // For Triple visits: process both MR and DM separately
+      if (report.typeOfVisit == 'Triple') {
+        // Process MR from Triple visit
+        if (report.mrId.isNotEmpty && report.mrName.isNotEmpty) {
+          final mrKey = 'mr_${report.mrId}';
+          if (!personReports.containsKey(mrKey)) {
+            personReports[mrKey] = {
+              'id': report.mrId,
+              'name': report.mrName,
+              'role': 'MR',
+              'reports': <CoachingReport>[],
+            };
+          }
+          personReports[mrKey]!['reports'].add(report);
         }
-        personReports[key]!['reports'].add(report);
+        
+        // Process DM from Triple visit
+        if (report.dmId.isNotEmpty && report.dmName.isNotEmpty) {
+          final dmKey = 'dm_${report.dmId}';
+          if (!personReports.containsKey(dmKey)) {
+            personReports[dmKey] = {
+              'id': report.dmId,
+              'name': report.dmName,
+              'role': 'DM',
+              'reports': <CoachingReport>[],
+            };
+          }
+          personReports[dmKey]!['reports'].add(report);
+        }
+      } else {
+        // For Double visits: process MR or DM reports
+        if (report.mrId.isNotEmpty && report.mrName.isNotEmpty) {
+          final isDMReport = _isDMReport(report);
+          final role = isDMReport ? 'DM' : 'MR';
+          final key = '${role.toLowerCase()}_${report.mrId}';
+          
+          if (!personReports.containsKey(key)) {
+            personReports[key] = {
+              'id': report.mrId,
+              'name': report.mrName,
+              'role': role,
+              'reports': <CoachingReport>[],
+            };
+          }
+          personReports[key]!['reports'].add(report);
+        }
       }
     }
 
@@ -487,9 +653,11 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
       final sortedReports = List<CoachingReport>.from(reports)
         ..sort((a, b) => a.date.compareTo(b.date));
 
-      // Calculate scores for MR reports only
+      // Calculate scores - use getDMScore() for DM reports, getAverageScore() for MR reports
+      final personRole = person['role'] as String;
+      final isDM = personRole == 'DM';
       final visitScores = sortedReports.map((r) {
-        final score = r.getAverageScore();
+        final score = isDM ? r.getDMScore() : r.getAverageScore();
         return <String, dynamic>{
           'date': r.date,
           'score': double.parse(score.toStringAsFixed(2)),
@@ -777,7 +945,7 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 const Text(
-                                  'Medical Rep Performance',
+                                  'Medical Rep & District Manager Performance',
                                   style: TextStyle(
                                     color: AppColors.primaryBlue,
                                     fontSize: 18,
@@ -972,7 +1140,6 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                       )
                                     : Column(
                                         children: monthlyMRVisits.map((person) {
-                                          final visits = person['visits'] as List<dynamic>;
                                           final visitCount = person['visitCount'] as int;
                                           final personName = person['name'] as String;
                                           final personId = person['id'] as String;
@@ -1192,7 +1359,7 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                                                 ),
                                                               ),
                                                               const Text(
-                                                                'Visits',
+                                                                'Coaching Visits',
                                                                 style: TextStyle(
                                                                   color: AppColors.gray600,
                                                                   fontSize: 12,
@@ -1235,100 +1402,250 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                                     ],
                                                   ),
                                                 ),
-                                                const SizedBox(height: 16),
-                                                // Trend Chart
-                                                if (visitCount > 1) ...[
-                                                  Container(
-                                                    height: 120,
-                                                    padding: const EdgeInsets.all(12),
-                                                    decoration: BoxDecoration(
-                                                      color: Colors.white,
-                                                      borderRadius: BorderRadius.circular(8),
-                                                      border: Border.all(color: AppColors.gray200),
-                                                    ),
-                                                    child: LineChart(
-                                                      LineChartData(
-                                                        gridData: FlGridData(
-                                                          show: true,
-                                                          drawVerticalLine: false,
-                                                          getDrawingHorizontalLine: (value) {
-                                                            return FlLine(
-                                                              color: AppColors.gray200,
-                                                              strokeWidth: 1,
-                                                              dashArray: [3, 3],
-                                                            );
-                                                          },
-                                                        ),
-                                                        titlesData: FlTitlesData(
-                                                          leftTitles: AxisTitles(
-                                                            sideTitles: SideTitles(
-                                                              showTitles: true,
-                                                              reservedSize: 35,
-                                                              getTitlesWidget: (value, meta) {
-                                                                return Text(
-                                                                  value.toStringAsFixed(1),
-                                                                  style: const TextStyle(
-                                                                    color: AppColors.gray600,
-                                                                    fontSize: 10,
+                                                // Visit details - show first visit and more if available
+                                                if (person['visits'] != null && (person['visits'] as List).isNotEmpty) ...[
+                                                  Padding(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                                                    child: Column(
+                                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                                      children: [
+                                                        const SizedBox(height: 16),
+                                                        // Trend Chart (only if more than 1 visit)
+                                                        if (visitCount > 1) ...[
+                                                          Container(
+                                                            height: 120,
+                                                            padding: const EdgeInsets.all(12),
+                                                            decoration: BoxDecoration(
+                                                              color: Colors.white,
+                                                              borderRadius: BorderRadius.circular(8),
+                                                              border: Border.all(color: AppColors.gray200),
+                                                            ),
+                                                            child: LineChart(
+                                                              LineChartData(
+                                                                gridData: FlGridData(
+                                                                  show: true,
+                                                                  drawVerticalLine: false,
+                                                                  getDrawingHorizontalLine: (value) {
+                                                                    return FlLine(
+                                                                      color: AppColors.gray200,
+                                                                      strokeWidth: 1,
+                                                                      dashArray: [3, 3],
+                                                                    );
+                                                                  },
+                                                                ),
+                                                                titlesData: FlTitlesData(
+                                                                  leftTitles: AxisTitles(
+                                                                    sideTitles: SideTitles(
+                                                                      showTitles: true,
+                                                                      reservedSize: 35,
+                                                                      getTitlesWidget: (value, meta) {
+                                                                        return Text(
+                                                                          value.toStringAsFixed(1),
+                                                                          style: const TextStyle(
+                                                                            color: AppColors.gray600,
+                                                                            fontSize: 10,
+                                                                          ),
+                                                                        );
+                                                                      },
+                                                                    ),
                                                                   ),
-                                                                );
-                                                              },
+                                                                  bottomTitles: AxisTitles(
+                                                                    sideTitles: SideTitles(
+                                                                      showTitles: true,
+                                                                      reservedSize: 30,
+                                                                      getTitlesWidget: (value, meta) {
+                                                                        final visits = person['visits'] as List;
+                                                                        if (value.toInt() >= 0 && value.toInt() < visits.length) {
+                                                                          return Padding(
+                                                                            padding: const EdgeInsets.only(top: 4),
+                                                                            child: Text(
+                                                                              'V${value.toInt() + 1}',
+                                                                              style: const TextStyle(
+                                                                                color: AppColors.gray600,
+                                                                                fontSize: 10,
+                                                                              ),
+                                                                            ),
+                                                                          );
+                                                                        }
+                                                                        return const Text('');
+                                                                      },
+                                                                    ),
+                                                                  ),
+                                                                  rightTitles: const AxisTitles(
+                                                                    sideTitles: SideTitles(showTitles: false),
+                                                                  ),
+                                                                  topTitles: const AxisTitles(
+                                                                    sideTitles: SideTitles(showTitles: false),
+                                                                  ),
+                                                                ),
+                                                                borderData: FlBorderData(
+                                                                  show: true,
+                                                                  border: Border.all(color: AppColors.gray200),
+                                                                ),
+                                                                lineBarsData: [
+                                                                  LineChartBarData(
+                                                                    spots: (person['visits'] as List).asMap().entries.map((entry) {
+                                                                      return FlSpot(
+                                                                        entry.key.toDouble(),
+                                                                        entry.value['score'] as double,
+                                                                      );
+                                                                    }).toList(),
+                                                                    isCurved: true,
+                                                                    color: AppColors.primaryCyan,
+                                                                    barWidth: 3,
+                                                                    dotData: FlDotData(
+                                                                      show: true,
+                                                                      getDotPainter: (spot, percent, barData, index) {
+                                                                        return FlDotCirclePainter(
+                                                                          radius: 4,
+                                                                          color: AppColors.primaryBlue,
+                                                                          strokeWidth: 2,
+                                                                          strokeColor: Colors.white,
+                                                                        );
+                                                                      },
+                                                                    ),
+                                                                    belowBarData: BarAreaData(
+                                                                      show: true,
+                                                                      color: AppColors.primaryCyan.withOpacity(0.1),
+                                                                    ),
+                                                                  ),
+                                                                ],
+                                                                minY: 0,
+                                                                maxY: 6,
+                                                                lineTouchData: LineTouchData(
+                                                                  touchTooltipData: LineTouchTooltipData(
+                                                                    getTooltipItems: (List<LineBarSpot> touchedSpots) {
+                                                                      return touchedSpots.map((LineBarSpot touchedSpot) {
+                                                                        final visits = person['visits'] as List;
+                                                                        final visit = visits[touchedSpot.x.toInt()];
+                                                                        return LineTooltipItem(
+                                                                          '${DateFormat('MMM dd').format(DateTime.parse(visit['date']))}\n${touchedSpot.y.toStringAsFixed(2)}/6',
+                                                                          const TextStyle(
+                                                                            color: Colors.white,
+                                                                            fontWeight: FontWeight.bold,
+                                                                          ),
+                                                                        );
+                                                                      }).toList();
+                                                                    },
+                                                                  ),
+                                                                ),
+                                                              ),
                                                             ),
                                                           ),
-                                                          bottomTitles: AxisTitles(
-                                                            sideTitles: SideTitles(
-                                                              showTitles: true,
-                                                              reservedSize: 30,
-                                                              getTitlesWidget: (value, meta) {
-                                                                if (value.toInt() >= 0 && value.toInt() < visits.length) {
-                                                                  final dateStr = visits[value.toInt()]['date'] as String;
-                                                                  try {
-                                                                    final date = DateTime.parse(dateStr);
-                                                                    return Text(
-                                                                      DateFormat('MMM d').format(date),
+                                                          const SizedBox(height: 16),
+                                                        ],
+                                                        // Visits - Compact horizontal list
+                                                        SizedBox(
+                                                          height: 80,
+                                                          child: ListView.builder(
+                                                            scrollDirection: Axis.horizontal,
+                                                            itemCount: (person['visits'] as List).length,
+                                                            itemBuilder: (context, index) {
+                                                              final visit = (person['visits'] as List)[index];
+                                                              final vScore = visit['score'] as double;
+                                                              final vScoreColor = vScore >= 5.0 ? AppColors.success 
+                                                                  : vScore >= 4.0 ? AppColors.warning 
+                                                                  : AppColors.error;
+                                                              return Container(
+                                                                width: 100,
+                                                                margin: EdgeInsets.only(right: index < (person['visits'] as List).length - 1 ? 10 : 0),
+                                                                decoration: BoxDecoration(
+                                                                  gradient: LinearGradient(
+                                                                    begin: Alignment.topLeft,
+                                                                    end: Alignment.bottomRight,
+                                                                    colors: [
+                                                                      vScoreColor.withOpacity(0.08),
+                                                                      vScoreColor.withOpacity(0.15),
+                                                                    ],
+                                                                  ),
+                                                                  borderRadius: BorderRadius.circular(12),
+                                                                  border: Border.all(color: vScoreColor.withOpacity(0.3)),
+                                                                ),
+                                                                child: Column(
+                                                                  mainAxisAlignment: MainAxisAlignment.center,
+                                                                  children: [
+                                                                    // Visit number badge
+                                                                    Container(
+                                                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                                                      decoration: BoxDecoration(
+                                                                        color: vScoreColor.withOpacity(0.2),
+                                                                        borderRadius: BorderRadius.circular(8),
+                                                                      ),
+                                                                      child: Text(
+                                                                        'Coaching Visit ${index + 1}',
+                                                                        style: TextStyle(
+                                                                          color: vScoreColor,
+                                                                          fontSize: 10,
+                                                                          fontWeight: FontWeight.w600,
+                                                                        ),
+                                                                      ),
+                                                                    ),
+                                                                    const SizedBox(height: 4),
+                                                                    // Date
+                                                                    Text(
+                                                                      DateFormat('MMM dd').format(DateTime.parse(visit['date'])),
                                                                       style: const TextStyle(
                                                                         color: AppColors.gray600,
-                                                                        fontSize: 9,
+                                                                        fontSize: 10,
                                                                       ),
-                                                                    );
-                                                                  } catch (e) {
-                                                                    return const Text('');
-                                                                  }
-                                                                }
-                                                                return const Text('');
-                                                              },
-                                                            ),
-                                                          ),
-                                                          rightTitles: const AxisTitles(
-                                                            sideTitles: SideTitles(showTitles: false),
-                                                          ),
-                                                          topTitles: const AxisTitles(
-                                                            sideTitles: SideTitles(showTitles: false),
+                                                                    ),
+                                                                    const SizedBox(height: 2),
+                                                                    // Score
+                                                                    Row(
+                                                                      mainAxisAlignment: MainAxisAlignment.center,
+                                                                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                                                                      textBaseline: TextBaseline.alphabetic,
+                                                                      mainAxisSize: MainAxisSize.min,
+                                                                      children: [
+                                                                        Text(
+                                                                          vScore.toStringAsFixed(1),
+                                                                          style: TextStyle(
+                                                                            fontSize: 18,
+                                                                            fontWeight: FontWeight.bold,
+                                                                            color: vScoreColor,
+                                                                          ),
+                                                                        ),
+                                                                        Text(
+                                                                          '/6',
+                                                                          style: TextStyle(
+                                                                            color: AppColors.gray600,
+                                                                            fontSize: 10,
+                                                                          ),
+                                                                        ),
+                                                                      ],
+                                                                    ),
+                                                                  ],
+                                                                ),
+                                                              );
+                                                            },
                                                           ),
                                                         ),
-                                                        borderData: FlBorderData(show: false),
-                                                        lineBarsData: [
-                                                          LineChartBarData(
-                                                            spots: visits.asMap().entries.map((entry) {
-                                                              return FlSpot(
-                                                                entry.key.toDouble(),
-                                                                entry.value['score'] as double,
-                                                              );
-                                                            }).toList(),
-                                                            isCurved: true,
-                                                            color: AppColors.primaryCyan,
-                                                            barWidth: 2,
-                                                            dotData: FlDotData(show: true),
-                                                            belowBarData: BarAreaData(
-                                                              show: true,
-                                                              color: AppColors.primaryCyan.withOpacity(0.1),
+                                                        const SizedBox(height: 12),
+                                                        const Divider(),
+                                                        const SizedBox(height: 8),
+                                                        Row(
+                                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                          children: [
+                                                            const Text(
+                                                              'Total Coaching Visits',
+                                                              style: TextStyle(
+                                                                color: AppColors.gray600,
+                                                                fontSize: 12,
+                                                              ),
                                                             ),
-                                                          ),
-                                                        ],
-                                                      ),
+                                                            Text(
+                                                              '$visitCount visit${visitCount != 1 ? 's' : ''} completed',
+                                                              style: const TextStyle(
+                                                                color: AppColors.primaryBlue,
+                                                                fontSize: 12,
+                                                                fontWeight: FontWeight.w500,
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ],
                                                     ),
                                                   ),
-                                                  const SizedBox(height: 16),
                                                 ],
                                               ],
                                             ),
@@ -1622,25 +1939,90 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Text(
-                                personName,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 16,
+                              // For Triple visits, show first name of DM + dash + first name of MR
+                              if (report.typeOfVisit == 'Triple' && report.dmName.isNotEmpty && report.mrName.isNotEmpty)
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      () {
+                                        // Get first name only (first word) from DM and MR names
+                                        final dmParts = report.dmName.trim().split(' ');
+                                        final mrParts = report.mrName.trim().split(' ');
+                                        final dmFirstName = dmParts.isNotEmpty ? dmParts[0] : '';
+                                        final mrFirstName = mrParts.isNotEmpty ? mrParts[0] : '';
+                                        return '$dmFirstName - $mrFirstName';
+                                      }(),
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 16,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                      maxLines: 1,
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'Triple Visit',
+                                      style: const TextStyle(
+                                        color: AppColors.gray600,
+                                        fontSize: 12,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                      maxLines: 1,
+                                    ),
+                                  ],
+                                )
+                              // For Single visits, show "Single Visit" instead of role label
+                              else if (report.typeOfVisit == 'Single')
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      personName,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 16,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                      maxLines: 1,
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'Single Visit',
+                                      style: const TextStyle(
+                                        color: AppColors.gray600,
+                                        fontSize: 12,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                      maxLines: 1,
+                                    ),
+                                  ],
+                                )
+                              else
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      personName,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 16,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                      maxLines: 1,
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      _getRoleLabel(personRoleFromSupabase),
+                                      style: const TextStyle(
+                                        color: AppColors.gray600,
+                                        fontSize: 12,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                      maxLines: 1,
+                                    ),
+                                  ],
                                 ),
-                                overflow: TextOverflow.ellipsis,
-                                maxLines: 1,
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                _getRoleLabel(personRoleFromSupabase),
-                                style: const TextStyle(
-                                  color: AppColors.gray600,
-                                  fontSize: 12,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                                maxLines: 1,
-                              ),
                             ],
                           ),
                         ),
@@ -1734,6 +2116,49 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
         );
       }).toList(),
     );
+  }
+
+  /// Get coach name from users table
+  Future<String?> _getCoachName(String coachId) async {
+    debugPrint('   🔍 Getting coach name for coachId: $coachId');
+    
+    // First check cache
+    if (_coachNames.containsKey(coachId)) {
+      final cachedName = _coachNames[coachId];
+      debugPrint('   ✅ Found in cache: $cachedName');
+      return cachedName;
+    }
+    
+    // If not in cache, fetch from Supabase
+    try {
+      debugPrint('   🔄 Fetching from Supabase...');
+      final user = await SupabaseService.getUserById(coachId);
+      if (user != null) {
+        final id = (user['id'] ?? '').toString();
+        final name = (user['name'] ?? '').toString();
+        final role = (user['role'] ?? '').toString();
+        debugPrint('   📋 User data: id=$id, name=$name, role=$role');
+        
+        if (name.isNotEmpty) {
+          if (mounted) {
+            setState(() {
+              _coachNames[coachId] = name;
+            });
+          }
+          debugPrint('   ✅ Returning coach name: $name');
+          return name;
+        } else {
+          debugPrint('   ⚠️ User name is empty');
+        }
+      } else {
+        debugPrint('   ⚠️ User not found in Supabase');
+      }
+    } catch (e) {
+      debugPrint('   ❌ Error fetching coach name: $e');
+    }
+    
+    debugPrint('   ⚠️ Returning null for coach name');
+    return null;
   }
 
   Widget _buildModalSection(String title, List<Widget> children) {
@@ -2028,40 +2453,80 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    '${widget.coachRole.toUpperCase()} Coaching Report',
-                                    style: const TextStyle(
-                                      color: Colors.white70,
-                                      fontSize: 12,
+                                  // For Triple Visit, show both DM and MR names
+                                  if (report.typeOfVisit == 'Triple' && report.dmName.isNotEmpty && report.mrName.isNotEmpty)
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          '${widget.coachRole.toUpperCase()} Coaching Report',
+                                          style: const TextStyle(
+                                            color: Colors.white70,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          '${report.dmName} - ${report.mrName}',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                          maxLines: 1,
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          'Triple Visit',
+                                          style: TextStyle(
+                                            color: Colors.white.withOpacity(0.8),
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  else
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          '${widget.coachRole.toUpperCase()} Coaching Report',
+                                          style: const TextStyle(
+                                            color: Colors.white70,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          personName,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 18,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                          maxLines: 1,
+                                        ),
+                                        const SizedBox(height: 2),
+                                        if (report.typeOfVisit == 'Single')
+                                          Text(
+                                            'Type of Visit: Single',
+                                            style: TextStyle(
+                                              color: Colors.white.withOpacity(0.8),
+                                              fontSize: 12,
+                                            ),
+                                          )
+                                        else
+                                          Text(
+                                            _getRoleLabel(personRoleFromSupabase),
+                                            style: TextStyle(
+                                              color: Colors.white.withOpacity(0.8),
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                      ],
                                     ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    personName,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                    maxLines: 1,
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    _getRoleLabel(personRoleFromSupabase),
-                                    style: TextStyle(
-                                      color: Colors.white.withOpacity(0.8),
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    report.date,
-                                    style: TextStyle(
-                                      color: Colors.white.withOpacity(0.8),
-                                      fontSize: 12,
-                                    ),
-                                  ),
                                 ],
                               ),
                             ),
@@ -2134,19 +2599,58 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                             [
                               _buildModalInfoItem('Date', report.date),
                               _buildModalInfoItem('Average Score', '${avgScore.toStringAsFixed(2)} / 6.0'),
-                              if (report.dmName.isNotEmpty && !isDMReport)
-                                _buildModalInfoItem(
-                                  _getRoleLabel(_dmRoles[report.dmId]),
-                                  report.dmName,
+                              // Show Coach name (Product Manager) from users table
+                              if (widget.coachId != null && widget.coachId!.isNotEmpty)
+                                FutureBuilder<String?>(
+                                  future: _getCoachName(widget.coachId!),
+                                  builder: (context, snapshot) {
+                                    if (snapshot.connectionState == ConnectionState.waiting) {
+                                      return _buildModalInfoItem(
+                                        'Coach',
+                                        'Loading...',
+                                      );
+                                    }
+                                    
+                                    final coachName = snapshot.data;
+                                    if (coachName != null && coachName.isNotEmpty) {
+                                      // Show role prefix (PM or MSL) with the actual coach name
+                                      final rolePrefix = widget.coachRole == 'pm' ? 'PM' : 'MSL';
+                                      return _buildModalInfoItem(
+                                        'Coach',
+                                        '$rolePrefix: $coachName',
+                                      );
+                                    } else {
+                                      // Fallback if name not found
+                                      final roleLabel = widget.coachRole == 'pm' ? 'Product Manager' : 'Medical Science Liaison';
+                                      return _buildModalInfoItem(
+                                        'Coach',
+                                        roleLabel,
+                                      );
+                                    }
+                                  },
                                 ),
-                              _buildModalInfoItem(
-                                _getRoleLabel(personRoleFromSupabase),
-                                personName,
-                              ),
+                              // Show Type of Visit for PM/MSL reports
+                              if (isPMMSLReport && report.typeOfVisit != null && report.typeOfVisit!.isNotEmpty)
+                                _buildModalInfoItem('Type of Visit', report.typeOfVisit!),
+                              // For Triple Visit, show both DM and MR
+                              if (report.typeOfVisit == 'Triple' && report.dmName.isNotEmpty && report.mrName.isNotEmpty) ...[
+                                _buildModalInfoItem('District Manager', report.dmName),
+                                _buildModalInfoItem('Medical Rep', report.mrName),
+                              ] else ...[
+                                if (report.dmName.isNotEmpty && !isDMReport)
+                                  _buildModalInfoItem(
+                                    _getRoleLabel(_dmRoles[report.dmId]),
+                                    report.dmName,
+                                  ),
+                                // Don't show Medical Rep for Single visits
+                                if (report.typeOfVisit != 'Single')
+                                  _buildModalInfoItem(
+                                    _getRoleLabel(personRoleFromSupabase),
+                                    personName,
+                                  ),
+                              ],
                               if (report.brickName != null && report.brickName!.isNotEmpty)
                                 _buildModalInfoItem('Brick Name', report.brickName!),
-                              if (report.locationName != null && report.locationName!.isNotEmpty)
-                                _buildModalInfoItem('Location', report.locationName!),
                             ],
                           ),
                           const SizedBox(height: 24),
@@ -2188,264 +2692,266 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                 ],
                               ),
                             const SizedBox(height: 24),
-                            // DM Feedback (only for DM reports)
-                            if (isDMReport && (report.dmFeedbackComments != null || report.customerAwareness != null || report.medicalProductKnowledgeDM != null || report.teamwork != null))
-                              _buildModalSection(
-                                'DM Feedback',
-                                [
-                                  if (report.teamwork != null)
-                                    _buildModalInfoItem('Teamwork and Cooperation', report.teamwork!),
-                                  if (report.customerAwareness != null)
-                                    _buildModalInfoItem('Customer Awareness', report.customerAwareness!),
-                                  if (report.medicalProductKnowledgeDM != null)
-                                    _buildModalInfoItem('Medical & Product Knowledge', report.medicalProductKnowledgeDM!),
-                                  if (report.dmFeedbackComments != null && report.dmFeedbackComments!.isNotEmpty)
-                                    Container(
-                                      margin: const EdgeInsets.only(bottom: 8),
-                                      padding: const EdgeInsets.all(12),
-                                      decoration: BoxDecoration(
-                                        color: AppColors.gray50,
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          const Text(
-                                            'DM Feedback Comments',
-                                            style: TextStyle(
-                                              color: AppColors.gray600,
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w500,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 8),
-                                          Text(
-                                            report.dmFeedbackComments!,
-                                            style: const TextStyle(
-                                              color: AppColors.gray900,
-                                              fontSize: 14,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            // MR Feedback (only for MR reports)
-                            if (!isDMReport && (report.punctuality != null || report.dressCode != null || report.pharmacyFeedback != null || 
-                                report.patientCentricApproach != null || report.medicalProductKnowledgeMR != null ||
-                                report.featureBenefits != null || report.closingCommitment != null ||
-                                report.engaging != null || report.mrFeedbackComments != null))
-                              _buildModalSection(
-                                'MR Feedback',
-                                [
-                                  if (report.punctuality != null)
-                                    _buildModalYesNoItem('Punctuality', report.punctuality),
-                                  if (report.dressCode != null)
-                                    _buildModalYesNoItem('Dress Code', report.dressCode),
-                                  if (report.pharmacyFeedback != null)
-                                    _buildModalScoreItem('Pharmacy Feedback', report.pharmacyFeedback),
-                                  if (report.reviewProfile != null)
-                                    _buildModalScoreItem('Review Profile', report.reviewProfile),
-                                  if (report.patientCentricApproach != null)
-                                    _buildModalScoreItem('Patient Centric Approach', report.patientCentricApproach),
-                                  if (report.medicalProductKnowledgeMR != null)
-                                    _buildModalScoreItem('Medical Product Knowledge (MR)', report.medicalProductKnowledgeMR),
-                                  if (report.featureBenefits != null)
-                                    _buildModalScoreItem('Feature Benefits', report.featureBenefits),
-                                  if (report.closingCommitment != null)
-                                    _buildModalScoreItem('Closing Commitment', report.closingCommitment),
-                                  if (report.engaging != null)
-                                    _buildModalScoreItem('Engaging Customer', report.engaging),
-                                  if (report.mrFeedbackComments != null && report.mrFeedbackComments!.isNotEmpty)
-                                    Container(
-                                      margin: const EdgeInsets.only(bottom: 8),
-                                      padding: const EdgeInsets.all(12),
-                                      decoration: BoxDecoration(
-                                        color: AppColors.gray50,
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          const Text(
-                                            'MR Feedback Comments',
-                                            style: TextStyle(
-                                              color: AppColors.gray600,
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w500,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 8),
-                                          Text(
-                                            report.mrFeedbackComments!,
-                                            style: const TextStyle(
-                                              color: AppColors.gray900,
-                                              fontSize: 14,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                ],
-                              ),
-                          ] else ...[
-                            // DM/FT Fields
-                            // Personal Attributes
-                            _buildModalSection(
-                              'Personal Attributes',
-                              [
-                                _buildModalYesNoItem('Punctuality', report.punctuality),
-                                _buildModalYesNoItem('Dress Code', report.dressCode),
-                                _buildModalYesNoItem('Time & Territory Management', report.timeManagement),
-                              ],
-                            ),
-                            const SizedBox(height: 24),
-                            // Performance Scores
-                            _buildModalSection(
-                              'Performance Scores',
-                              [
-                                _buildModalScoreItem('Pharmacy Feedback', report.pharmacyFeedback),
-                                _buildModalScoreItem('Review Customer Profile', report.reviewProfile),
-                                _buildModalScoreItem('Brand Bonding Ladder', report.brandBonding),
-                                _buildModalScoreItem('SMART Objectives', report.smartObjectives),
-                                _buildModalScoreItem('Opening / Rapport', report.opening),
-                                _buildModalScoreItem('Patient Profile', report.patientProfile),
-                                _buildModalScoreItem('Engaging Customer', report.engaging),
-                                _buildModalScoreItem('Insightful Questions', report.insightfulQuestions),
-                                _buildModalScoreItem('Active Listening', report.activeListening),
-                                _buildModalScoreItem('Link Features', report.linkFeatures),
-                                _buildModalScoreItem('Product Knowledge', report.productKnowledge),
-                                _buildModalScoreItem('E-detailing', report.eDetailing),
-                                _buildModalScoreItem('Answering Questions', report.answeringQuestions),
-                                _buildModalScoreItem('Summarize Call', report.summarizeCall),
-                                _buildModalScoreItem('Ask for Commitment', report.askCommitment),
-                                _buildModalScoreItem('Bridging', report.bridging),
-                                _buildModalScoreItem('Self-assessment', report.selfAssessment),
-                              ],
-                            ),
-                            const SizedBox(height: 24),
-                            // Feedback
-                            _buildModalSection(
-                              'Feedback',
-                              [
-                                Container(
-                                  padding: const EdgeInsets.all(16),
-                                  decoration: BoxDecoration(
-                                    color: AppColors.success.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: AppColors.success.withOpacity(0.3),
-                                    ),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      const Row(
-                                        children: [
-                                          Icon(Icons.check_circle, color: AppColors.success, size: 16),
-                                          SizedBox(width: 8),
-                                          Text(
-                                            'Strengths',
-                                            style: TextStyle(
-                                              color: AppColors.gray700,
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w500,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        report.strengths ?? 'No feedback provided',
-                                        style: const TextStyle(
-                                          color: AppColors.gray900,
-                                          fontSize: 14,
+                            // For Triple Visit: show both DM and MR feedback
+                            // For other visits: show DM or MR feedback based on report type
+                            if (report.typeOfVisit == 'Triple') ...[
+                              // DM Feedback for Triple Visit
+                              if (report.dmFeedbackComments != null || report.customerAwareness != null || report.medicalProductKnowledgeDM != null || report.teamwork != null)
+                                _buildModalSection(
+                                  'DM Feedback',
+                                  [
+                                    if (report.teamwork != null)
+                                      _buildModalInfoItem('Teamwork and Cooperation', report.teamwork!),
+                                    if (report.customerAwareness != null)
+                                      _buildModalInfoItem('Customer Awareness', report.customerAwareness!),
+                                    if (report.medicalProductKnowledgeDM != null)
+                                      _buildModalInfoItem('Medical & Product Knowledge', report.medicalProductKnowledgeDM!),
+                                    if (report.dmFeedbackComments != null && report.dmFeedbackComments!.isNotEmpty)
+                                      Container(
+                                        margin: const EdgeInsets.only(bottom: 8),
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color: AppColors.gray50,
+                                          borderRadius: BorderRadius.circular(8),
                                         ),
-                                        overflow: TextOverflow.visible,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                Container(
-                                  padding: const EdgeInsets.all(16),
-                                  decoration: BoxDecoration(
-                                    color: AppColors.warning.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: AppColors.warning.withOpacity(0.3),
-                                    ),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      const Row(
-                                        children: [
-                                          Icon(Icons.track_changes, color: AppColors.warning, size: 16),
-                                          SizedBox(width: 8),
-                                          Text(
-                                            'Areas of Improvement',
-                                            style: TextStyle(
-                                              color: AppColors.gray700,
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w500,
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            const Text(
+                                              'DM Feedback Comments',
+                                              style: TextStyle(
+                                                color: AppColors.gray600,
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w500,
+                                              ),
                                             ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        report.improvements ?? 'No feedback provided',
-                                        style: const TextStyle(
-                                          color: AppColors.gray900,
-                                          fontSize: 14,
+                                            const SizedBox(height: 8),
+                                            Text(
+                                              report.dmFeedbackComments!,
+                                              style: const TextStyle(
+                                                color: AppColors.gray900,
+                                                fontSize: 14,
+                                              ),
+                                            ),
+                                          ],
                                         ),
-                                        overflow: TextOverflow.visible,
                                       ),
-                                    ],
-                                  ),
+                                  ],
+                                ),
+                              const SizedBox(height: 24),
+                              // MR Feedback for Triple Visit
+                              if (report.punctuality != null || report.dressCode != null || report.pharmacyFeedback != null || 
+                                  report.patientCentricApproach != null || report.medicalProductKnowledgeMR != null ||
+                                  report.featureBenefits != null || report.closingCommitment != null ||
+                                  report.engaging != null || report.mrFeedbackComments != null)
+                                _buildModalSection(
+                                  'MR Feedback',
+                                  [
+                                    if (report.punctuality != null)
+                                      _buildModalYesNoItem('Punctuality', report.punctuality),
+                                    if (report.dressCode != null)
+                                      _buildModalYesNoItem('Dress Code', report.dressCode),
+                                    if (report.pharmacyFeedback != null)
+                                      _buildModalScoreItem('Pharmacy Feedback', report.pharmacyFeedback),
+                                    if (report.reviewProfile != null)
+                                      _buildModalScoreItem('Review Profile', report.reviewProfile),
+                                    if (report.patientCentricApproach != null)
+                                      _buildModalScoreItem('Patient Centric Approach', report.patientCentricApproach),
+                                    if (report.medicalProductKnowledgeMR != null)
+                                      _buildModalScoreItem('Medical Product Knowledge (MR)', report.medicalProductKnowledgeMR),
+                                    if (report.featureBenefits != null)
+                                      _buildModalScoreItem('Feature Benefits', report.featureBenefits),
+                                    if (report.closingCommitment != null)
+                                      _buildModalScoreItem('Closing Commitment', report.closingCommitment),
+                                    if (report.engaging != null)
+                                      _buildModalScoreItem('Engaging Customer', report.engaging),
+                                    if (report.mrFeedbackComments != null && report.mrFeedbackComments!.isNotEmpty)
+                                      Container(
+                                        margin: const EdgeInsets.only(bottom: 8),
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color: AppColors.gray50,
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            const Text(
+                                              'MR Feedback Comments',
+                                              style: TextStyle(
+                                                color: AppColors.gray600,
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            Text(
+                                              report.mrFeedbackComments!,
+                                              style: const TextStyle(
+                                                color: AppColors.gray900,
+                                                fontSize: 14,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                            ] else ...[
+                              // DM Feedback (only for DM reports from Double visits)
+                              if (isDMReport && (report.dmFeedbackComments != null || report.customerAwareness != null || report.medicalProductKnowledgeDM != null || report.teamwork != null))
+                                _buildModalSection(
+                                  'DM Feedback',
+                                  [
+                                    if (report.teamwork != null)
+                                      _buildModalInfoItem('Teamwork and Cooperation', report.teamwork!),
+                                    if (report.customerAwareness != null)
+                                      _buildModalInfoItem('Customer Awareness', report.customerAwareness!),
+                                    if (report.medicalProductKnowledgeDM != null)
+                                      _buildModalInfoItem('Medical & Product Knowledge', report.medicalProductKnowledgeDM!),
+                                    if (report.dmFeedbackComments != null && report.dmFeedbackComments!.isNotEmpty)
+                                      Container(
+                                        margin: const EdgeInsets.only(bottom: 8),
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color: AppColors.gray50,
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            const Text(
+                                              'DM Feedback Comments',
+                                              style: TextStyle(
+                                                color: AppColors.gray600,
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            Text(
+                                              report.dmFeedbackComments!,
+                                              style: const TextStyle(
+                                                color: AppColors.gray900,
+                                                fontSize: 14,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              // MR Feedback (only for MR reports from Double visits)
+                              if (!isDMReport && (report.punctuality != null || report.dressCode != null || report.pharmacyFeedback != null || 
+                                  report.patientCentricApproach != null || report.medicalProductKnowledgeMR != null ||
+                                  report.featureBenefits != null || report.closingCommitment != null ||
+                                  report.engaging != null || report.mrFeedbackComments != null))
+                                _buildModalSection(
+                                  'MR Feedback',
+                                  [
+                                    if (report.punctuality != null)
+                                      _buildModalYesNoItem('Punctuality', report.punctuality),
+                                    if (report.dressCode != null)
+                                      _buildModalYesNoItem('Dress Code', report.dressCode),
+                                    if (report.pharmacyFeedback != null)
+                                      _buildModalScoreItem('Pharmacy Feedback', report.pharmacyFeedback),
+                                    if (report.reviewProfile != null)
+                                      _buildModalScoreItem('Review Profile', report.reviewProfile),
+                                    if (report.patientCentricApproach != null)
+                                      _buildModalScoreItem('Patient Centric Approach', report.patientCentricApproach),
+                                    if (report.medicalProductKnowledgeMR != null)
+                                      _buildModalScoreItem('Medical Product Knowledge (MR)', report.medicalProductKnowledgeMR),
+                                    if (report.featureBenefits != null)
+                                      _buildModalScoreItem('Feature Benefits', report.featureBenefits),
+                                    if (report.closingCommitment != null)
+                                      _buildModalScoreItem('Closing Commitment', report.closingCommitment),
+                                    if (report.engaging != null)
+                                      _buildModalScoreItem('Engaging Customer', report.engaging),
+                                    if (report.mrFeedbackComments != null && report.mrFeedbackComments!.isNotEmpty)
+                                      Container(
+                                        margin: const EdgeInsets.only(bottom: 8),
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color: AppColors.gray50,
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            const Text(
+                                              'MR Feedback Comments',
+                                              style: TextStyle(
+                                                color: AppColors.gray600,
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            Text(
+                                              report.mrFeedbackComments!,
+                                              style: const TextStyle(
+                                                color: AppColors.gray900,
+                                                fontSize: 14,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                            ],
+                          ],
+                          // Score circle
+                          Container(
+                            width: 60,
+                            height: 60,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: scoreColor.withOpacity(0.3),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 3),
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 24),
-                            // Additional Info
-                            Container(
-                              padding: const EdgeInsets.all(16),
-                              decoration: BoxDecoration(
-                                color: AppColors.primaryCyan.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: AppColors.primaryCyan.withOpacity(0.3),
-                                ),
-                              ),
-                              child: RichText(
-                                text: TextSpan(
-                                  style: const TextStyle(
-                                    color: AppColors.gray700,
-                                    fontSize: 14,
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                SizedBox(
+                                  width: 52,
+                                  height: 52,
+                                  child: CircularProgressIndicator(
+                                    value: scorePercent / 100,
+                                    strokeWidth: 4,
+                                    backgroundColor: AppColors.gray200,
+                                    valueColor: AlwaysStoppedAnimation<Color>(scoreColor),
                                   ),
+                                ),
+                                Column(
+                                  mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const TextSpan(
-                                      text: 'Filled with Medical Representative: ',
-                                      style: TextStyle(fontWeight: FontWeight.bold),
-                                    ),
-                                    TextSpan(
-                                      text: report.filledWithMR ?? 'N/A',
+                                    Text(
+                                      avgScore.toStringAsFixed(1),
                                       style: TextStyle(
-                                        color: report.filledWithMR == 'Yes'
-                                            ? AppColors.success
-                                            : AppColors.error,
+                                        color: scoreColor,
+                                        fontSize: 14,
                                         fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    Text(
+                                      '/6',
+                                      style: TextStyle(
+                                        color: AppColors.gray600,
+                                        fontSize: 9,
                                       ),
                                     ),
                                   ],
                                 ),
-                                overflow: TextOverflow.ellipsis,
-                                maxLines: 2,
-                              ),
+                              ],
                             ),
-                          ],
+                          ),
                         ],
                       ),
                     ),
