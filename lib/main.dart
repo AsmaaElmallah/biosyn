@@ -32,14 +32,18 @@ void main() async {
   // Initialize Supabase (only if configured)
   if (SupabaseConfig.isConfigured) {
     try {
+      debugPrint('🔐 Initializing Supabase...');
+      debugPrint('   URL: ${SupabaseConfig.supabaseUrl}');
       await Supabase.initialize(
         url: SupabaseConfig.supabaseUrl,
         anonKey: SupabaseConfig.supabaseAnonKey,
       );
       debugPrint('✅ Supabase initialized successfully');
-    } catch (e) {
+    } catch (e, stackTrace) {
       // Supabase not configured or connection failed - continue with local only
       debugPrint('❌ Supabase initialization failed: $e');
+      debugPrint('   StackTrace: $stackTrace');
+      // Don't throw - app can still work in offline mode
     }
   } else {
     debugPrint('⚠️ Supabase not configured - running in offline mode');

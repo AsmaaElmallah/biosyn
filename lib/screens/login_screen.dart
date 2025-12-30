@@ -70,8 +70,14 @@ class _LoginScreenState extends State<LoginScreen> {
           if (errorString.contains('invalid') || 
               errorString.contains('password') || 
               errorString.contains('credentials') ||
-              errorString.contains('401')) {
+              errorString.contains('401') ||
+              errorString.contains('user not found') ||
+              errorString.contains('اسم المستخدم')) {
             _error = 'اسم المستخدم أو كلمة المرور غير صحيحة';
+          } else if (errorString.contains('supabase not initialized') ||
+                     errorString.contains('connection') ||
+                     errorString.contains('network')) {
+            _error = 'فشل الاتصال بالخادم. تحقق من اتصالك بالإنترنت وحاول مرة أخرى.';
           } else {
             _error = ErrorHandler.getUserFriendlyMessage(e);
           }

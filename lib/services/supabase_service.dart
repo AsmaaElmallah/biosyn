@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'notification_service.dart';
+import 'package:biosyn_report_flutter/config/supabase_config.dart';
 
 class SupabaseService {
   static SupabaseClient? _client;
@@ -823,13 +824,19 @@ class SupabaseService {
       debugPrint('🔐 SupabaseService.signIn() called');
       debugPrint('   Username: $username');
       
+      // Check if Supabase is initialized
+      if (!isInitialized) {
+        debugPrint('   ❌ Supabase not initialized');
+        throw Exception('Supabase not initialized. Please check your internet connection and try again.');
+      }
+      
       // Option 1: Use Supabase Auth (if using email-based auth)
       // For now, we'll use custom authentication with users table
       final user = await getUserByUsername(username);
       
       if (user == null) {
-        debugPrint('   ❌ User not found');
-        throw Exception('User not found');
+        debugPrint('   ❌ User not found: $username');
+        throw Exception('اسم المستخدم أو كلمة المرور غير صحيحة');
       }
       
       debugPrint('   ✅ User found: ${user['name']} (${user['role']})');
@@ -837,8 +844,8 @@ class SupabaseService {
       // In production, use password hashing (bcrypt)
       // For now, simple comparison (NOT SECURE - for development only)
       if (user['password'] != password && user['password_hash'] != password) {
-        debugPrint('   ❌ Invalid password');
-        throw Exception('Invalid password');
+        debugPrint('   ❌ Invalid password for user: $username');
+        throw Exception('اسم المستخدم أو كلمة المرور غير صحيحة');
       }
 
       // Check if user is active
@@ -1004,17 +1011,41 @@ class SupabaseService {
   static Future<Map<String, dynamic>?> getUserByUsername(String username) async {
     try {
       if (!isInitialized) {
-        return null; // Supabase not initialized
+        debugPrint('⚠️ Supabase not initialized in getUserByUsername');
+        // Try to reinitialize Supabase
+        try {
+          await Supabase.initialize(
+            url: SupabaseConfig.supabaseUrl,
+            anonKey: SupabaseConfig.supabaseAnonKey,
+          );
+          debugPrint('✅ Supabase reinitialized successfully');
+        } catch (initError) {
+          debugPrint('❌ Failed to reinitialize Supabase: $initError');
+          return null;
+        }
       }
       
+      debugPrint('🔍 Searching for user: $username');
       final response = await client!
           .from('users')
           .select()
           .eq('username', username)
           .maybeSingle();
 
+      if (response == null) {
+        debugPrint('   ❌ User not found in database: $username');
+      } else {
+        debugPrint('   ✅ User found: ${response['name']} (${response['role']})');
+      }
+
       return response;
     } catch (e) {
+      debugPrint('❌ Error in getUserByUsername: $e');
+      // Log full error details
+      if (e is Exception) {
+        debugPrint('   Error type: ${e.runtimeType}');
+        debugPrint('   Error message: ${e.toString()}');
+      }
       // If Supabase is not configured, return null (fallback to local auth)
       return null;
     }
