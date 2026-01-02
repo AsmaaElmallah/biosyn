@@ -112,9 +112,13 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
     if (isPMMSL) {
       // For PM/MSL reports:
       // - In Single/Double visits: dmId contains the coach ID
-      // - In Triple visits: dmId contains the coached DM ID, so we need to find the coach ID from other reports
+      // - In Triple visits: use coachId if available (from model), otherwise try to find from other reports
       if (report.typeOfVisit == 'Triple') {
-        // For Triple Visit, try to find coach ID from Single/Double visits with same coachRole
+        // For Triple Visit: use coachId directly from model if available
+        if (report.coachId != null && report.coachId!.isNotEmpty) {
+          return report.coachId;
+        }
+        // Fallback: try to find coach ID from Single/Double visits with same coachRole
         final similarReport = widget.reports.firstWhere(
           (r) => r.coachRole == coachRole && 
                  r.typeOfVisit != 'Triple' && 
@@ -130,6 +134,21 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
       // For DM/FT: dmId contains the coach ID
       return report.dmId;
     }
+  }
+  
+  String? _getCoachNameFromReport(CoachingReport report) {
+    final coachRole = report.coachRole ?? 'dm';
+    final isPMMSL = coachRole == 'pm' || coachRole == 'msl';
+    
+    if (isPMMSL && report.typeOfVisit == 'Triple') {
+      // For Triple Visit: use coachName directly from model if available
+      if (report.coachName != null && report.coachName!.isNotEmpty) {
+        return report.coachName;
+      }
+    }
+    
+    // For other cases: use dmName (which is the coach name)
+    return report.dmName;
   }
 
   Future<void> _loadMRProfiles() async {
@@ -291,6 +310,10 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
   }
 
   double _calculateAvgScore(CoachingReport report) {
+    // For Triple Visit, use combined average of DM and MR scores
+    if (report.typeOfVisit == 'Triple') {
+      return report.getTripleVisitScore();
+    }
     // For PM/MSL reports, use getDMScore() for DM reports and getAverageScore() for MR reports
     if (report.coachRole == 'pm' || report.coachRole == 'msl') {
       final isDMReport = _isDMReport(report);
@@ -962,28 +985,53 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                                                                 maxLines: 1,
                                                               ),
                                                               const SizedBox(height: 4),
-                                                              FutureBuilder<String?>(
-                                                                future: _getCoachName(_getCoachIdFromReport(report), report.coachRole),
-                                                                builder: (context, snapshot) {
-                                                                  final coachName = snapshot.data ?? report.dmName;
+                                                              Builder(
+                                                                builder: (context) {
                                                                   final coachRole = report.coachRole ?? 'pm';
                                                                   final roleAbbrev = coachRole == 'pm' ? 'PM' : coachRole == 'msl' ? 'MSL' : coachRole.toUpperCase();
-                                                                  return Row(
-                                                                    children: [
-                                                                      const Icon(Icons.person_outline, size: 14, color: AppColors.gray400),
-                                                                      const SizedBox(width: 4),
-                                                                      Expanded(
-                                                                        child: Text(
-                                                                          '$roleAbbrev: $coachName',
-                                                                          style: const TextStyle(
-                                                                            color: AppColors.gray600,
-                                                                            fontSize: 12,
+                                                                  // For Triple Visit, use coachName directly from model
+                                                                  if (report.typeOfVisit == 'Triple' && report.coachName != null && report.coachName!.isNotEmpty) {
+                                                                    return Row(
+                                                                      children: [
+                                                                        const Icon(Icons.person_outline, size: 14, color: AppColors.gray400),
+                                                                        const SizedBox(width: 4),
+                                                                        Expanded(
+                                                                          child: Text(
+                                                                            '$roleAbbrev: ${report.coachName}',
+                                                                            style: const TextStyle(
+                                                                              color: AppColors.gray600,
+                                                                              fontSize: 12,
+                                                                            ),
+                                                                            overflow: TextOverflow.ellipsis,
                                                                           ),
-                                                                          overflow: TextOverflow.ellipsis,
                                                                         ),
-                                                                      ),
-                                                                    ],
-                                                                  );
+                                                                      ],
+                                                                    );
+                                                                  } else {
+                                                                    // For other visits, fetch from Supabase
+                                                                    return FutureBuilder<String?>(
+                                                                      future: _getCoachName(_getCoachIdFromReport(report), report.coachRole),
+                                                                      builder: (context, snapshot) {
+                                                                        final coachName = snapshot.data ?? _getCoachNameFromReport(report) ?? report.dmName;
+                                                                        return Row(
+                                                                          children: [
+                                                                            const Icon(Icons.person_outline, size: 14, color: AppColors.gray400),
+                                                                            const SizedBox(width: 4),
+                                                                            Expanded(
+                                                                              child: Text(
+                                                                                '$roleAbbrev: $coachName',
+                                                                                style: const TextStyle(
+                                                                                  color: AppColors.gray600,
+                                                                                  fontSize: 12,
+                                                                                ),
+                                                                                overflow: TextOverflow.ellipsis,
+                                                                              ),
+                                                                            ),
+                                                                          ],
+                                                                        );
+                                                                      },
+                                                                    );
+                                                                  }
                                                                 },
                                                               ),
                                                             ],
@@ -1374,14 +1422,24 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                         [
                           _buildModalInfoItem('Date', report.date),
                           _buildModalInfoItem('Average Score', '${avgScore.toStringAsFixed(2)} / 6.0'),
-                          // Show Coach Role with actual coach name (fetch from Supabase)
-                          FutureBuilder<String?>(
-                            future: _getCoachName(_getCoachIdFromReport(report), report.coachRole),
-                            builder: (context, snapshot) {
-                              final coachName = snapshot.data ?? 'Loading...';
+                          // Show Coach Role with actual coach name - use coachName directly from model for Triple Visit
+                          Builder(
+                            builder: (context) {
                               final coachRole = report.coachRole ?? 'pm';
                               final roleLabel = _getCoachRoleLabel(coachRole);
-                              return _buildModalInfoItem('Coach Role', '$roleLabel: $coachName');
+                              // For Triple Visit, use coachName directly from model
+                              if (report.typeOfVisit == 'Triple' && report.coachName != null && report.coachName!.isNotEmpty) {
+                                return _buildModalInfoItem('Coach Role', '$roleLabel: ${report.coachName}');
+                              } else {
+                                // For other visits, fetch from Supabase
+                                return FutureBuilder<String?>(
+                                  future: _getCoachName(_getCoachIdFromReport(report), report.coachRole),
+                                  builder: (context, snapshot) {
+                                    final coachName = snapshot.data ?? _getCoachNameFromReport(report) ?? 'Loading...';
+                                    return _buildModalInfoItem('Coach Role', '$roleLabel: $coachName');
+                                  },
+                                );
+                              }
                             },
                           ),
                           // For Triple visit, show both DM and MR
@@ -1519,65 +1577,29 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                         ),
                       ],
                       const SizedBox(height: 24),
-                      // Location Information
-                      if (report.locationName != null || report.googleMapsUrl != null || report.brickName != null)
+                      // Brick Information
+                      if (report.brickName != null || report.visitCount != null || (report.doctorsVisited != null && report.doctorsVisited!.isNotEmpty))
                         _buildModalSection(
-                          'Location Information',
+                          'Brick Information',
                           [
                             if (report.brickName != null)
                               _buildModalInfoItem('Brick Name', report.brickName!),
-                            if (report.locationName != null)
-                              _buildModalInfoItem('Location Name', report.locationName!),
-                            if (report.brickLocationLat != null && report.brickLocationLng != null)
-                              _buildModalInfoItem('Coordinates', '${report.brickLocationLat!.toStringAsFixed(6)}, ${report.brickLocationLng!.toStringAsFixed(6)}'),
-                            if (report.googleMapsUrl != null)
-                              Container(
-                                padding: const EdgeInsets.all(12),
-                                margin: const EdgeInsets.only(bottom: 8),
-                                decoration: BoxDecoration(
-                                  color: AppColors.gray50,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Row(
-                                  children: [
-                                    const SizedBox(
-                                      width: 120,
-                                      child: Text(
-                                        'Google Maps',
-                                        style: TextStyle(
-                                          color: AppColors.gray600,
-                                          fontSize: 14,
-                                        ),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: InkWell(
-                                        onTap: () async {
-                                          final url = Uri.parse(report.googleMapsUrl!);
-                                          if (await canLaunchUrl(url)) {
-                                            await launchUrl(url, mode: LaunchMode.externalApplication);
-                                          }
-                                        },
-                                        child: Text(
-                                          'Open in Maps',
-                                          style: TextStyle(
-                                            color: AppColors.primaryBlue,
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w500,
-                                            decoration: TextDecoration.underline,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
                             if (report.visitCount != null)
                               _buildModalInfoItem('Visit Count', report.visitCount.toString()),
                             if (report.doctorsVisited != null && report.doctorsVisited!.isNotEmpty)
                               _buildModalInfoItem('Doctors Visited', report.doctorsVisited!),
                           ],
                         ),
+                      // Location Information (Google Maps Link only)
+                      if (report.googleMapsUrl != null && report.googleMapsUrl!.isNotEmpty) ...[
+                        const SizedBox(height: 24),
+                        _buildModalSection(
+                          'Location',
+                          [
+                            _buildModalLinkItem('Location', report.googleMapsUrl!),
+                          ],
+                        ),
+                      ],
                       // PM/MSL Specific Fields
                       if (report.coachRole == 'pm' || report.coachRole == 'msl') ...[
                         const SizedBox(height: 24),
@@ -1921,6 +1943,53 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                 color: AppColors.gray900,
                 fontSize: 14,
                 fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildModalLinkItem(String label, String url) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: AppColors.gray50,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 120,
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: AppColors.gray600,
+                fontSize: 14,
+              ),
+            ),
+          ),
+          Expanded(
+            child: InkWell(
+              onTap: () async {
+                final uri = Uri.parse(url);
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                }
+              },
+              child: Text(
+                url,
+                style: const TextStyle(
+                  color: Colors.blue,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  decoration: TextDecoration.underline,
+                ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 2,
               ),
             ),
           ),

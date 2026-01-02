@@ -120,6 +120,8 @@ class SupabaseService {
         'mr_id': report.mrId,
         'mr_name': report.mrName,
         'coach_role': report.coachRole,
+        // Note: coach_id and coach_name columns don't exist in database
+        // For Triple Visit, we identify the coach by coach_role and filter client-side
         // Brick Information
         'brick_name': report.brickName,
         'brick_location_lat': report.brickLocationLat,
@@ -196,37 +198,84 @@ class SupabaseService {
           serverCreatedAt = firstItem['created_at']?.toString();
         }
         
+        debugPrint('📋 Report saved with ID: $reportId');
+        debugPrint('   Report date: ${report.date}');
+        debugPrint('   Coach role: ${report.coachRole}');
+        debugPrint('   Type of visit: ${report.typeOfVisit}');
+        debugPrint('   Coach ID (from model): ${report.coachId}');
+        debugPrint('   Coach Name (from model): ${report.coachName}');
+        debugPrint('   DM ID: ${report.dmId}');
+        debugPrint('   DM Name: ${report.dmName}');
+        
+        // For Triple Visit: use coachId and coachName (PM/MSL), not dmId and dmName (coached DM)
+        final isTripleVisit = report.typeOfVisit == 'Triple' && (report.coachRole == 'pm' || report.coachRole == 'msl');
+        final senderId = isTripleVisit && report.coachId != null && report.coachId!.isNotEmpty 
+            ? report.coachId! 
+            : report.dmId;
+        final senderName = isTripleVisit && report.coachName != null && report.coachName!.isNotEmpty 
+            ? report.coachName! 
+            : report.dmName;
+        
+        debugPrint('📤 Notification sender info:');
+        debugPrint('   Is Triple Visit: $isTripleVisit');
+        debugPrint('   Sender ID: $senderId');
+        debugPrint('   Sender Name: $senderName');
+        debugPrint('   Sender Role: ${report.coachRole ?? 'dm'}');
+        
         // Check for time/date manipulation (compare device time with server time)
         if (serverCreatedAt != null) {
           final isTimeManipulated = checkTimeDateManipulation(serverCreatedAt);
           if (isTimeManipulated && reportId != null) {
             debugPrint('⚠️ Time/Date manipulation detected for report: $reportId');
             await sendTimeChangeNotification(
-              senderId: report.dmId,
-              senderName: report.dmName,
+              senderId: senderId,
+              senderName: senderName,
               senderRole: report.coachRole ?? 'dm',
               reportId: reportId,
               // Keep the coaching session date in the message
               reportDate: report.date,
             );
+          } else {
+            debugPrint('✅ No time manipulation detected');
           }
         } else {
           debugPrint('⚠️ Could not read created_at from Supabase response, skipping time manipulation check');
         }
         
-        // Send location notification to GM (if location is available)
-        if (reportId != null && report.brickLocationLat != null && report.brickLocationLng != null) {
-          await sendLocationNotification(
-            senderId: report.dmId,
-            senderName: report.dmName,
-            senderRole: report.coachRole ?? 'dm',
-            reportId: reportId,
-            reportDate: report.date,
-            latitude: report.brickLocationLat!,
-            longitude: report.brickLocationLng!,
-            locationName: report.locationName,
-            googleMapsUrl: report.googleMapsUrl,
-          );
+        // Send report submitted notification to all users (GM + all coaches)
+        // Always send notification when report is submitted (even without location)
+        if (reportId != null) {
+          debugPrint('📬 Sending report submitted notification...');
+          if (report.brickLocationLat != null && report.brickLocationLng != null) {
+            await sendLocationNotification(
+              senderId: senderId,
+              senderName: senderName,
+              senderRole: report.coachRole ?? 'dm',
+              reportId: reportId,
+              reportDate: report.date,
+              latitude: report.brickLocationLat!,
+              longitude: report.brickLocationLng!,
+              locationName: report.locationName,
+              googleMapsUrl: report.googleMapsUrl,
+            );
+          } else {
+            // Send notification without location if location is not available
+            debugPrint('⚠️ No location data available, sending notification without location');
+            await sendLocationNotification(
+              senderId: senderId,
+              senderName: senderName,
+              senderRole: report.coachRole ?? 'dm',
+              reportId: reportId,
+              reportDate: report.date,
+              latitude: 0.0,
+              longitude: 0.0,
+              locationName: null,
+              googleMapsUrl: null,
+            );
+          }
+          debugPrint('✅ Report submitted notification sent');
+        } else {
+          debugPrint('⚠️ Cannot send notification: reportId is null');
         }
         
         // Update plan status to 'completed' if a matching plan exists
@@ -628,18 +677,32 @@ class SupabaseService {
     required String mrName,
   }) async {
     try {
+      debugPrint('📅 SupabaseService.savePlan() called');
+      debugPrint('   - dmId: $dmId');
+      debugPrint('   - dmName: $dmName');
+      debugPrint('   - date: $date');
+      debugPrint('   - mrId: $mrId');
+      debugPrint('   - mrName: $mrName');
+      
       if (!isInitialized) {
+        debugPrint('   ❌ Supabase not initialized');
         throw Exception('Supabase not initialized');
       }
-      await client!.from('plans').insert({
+      
+      debugPrint('   🔄 Inserting plan into Supabase...');
+      final response = await client!.from('plans').insert({
         'dm_id': dmId,
         'dm_name': dmName,
         'date': date,
         'mr_id': mrId,
         'mr_name': mrName,
         'status': 'pending',
-      });
-    } catch (e) {
+      }).select();
+      
+      debugPrint('   ✅ Plan saved successfully: ${(response as List).length} row(s) inserted');
+    } catch (e, stackTrace) {
+      debugPrint('   ❌ Error saving plan: $e');
+      debugPrint('   Stack trace: $stackTrace');
       throw Exception('Failed to save plan: $e');
     }
   }
@@ -715,17 +778,26 @@ class SupabaseService {
   /// Get plans for a specific DM
   static Future<List<Map<String, dynamic>>> getPlans(String dmId) async {
     try {
+      debugPrint('📅 SupabaseService.getPlans() called for dmId: $dmId');
+      
       if (!isInitialized) {
+        debugPrint('   ❌ Supabase not initialized');
         return [];
       }
+      
+      debugPrint('   🔄 Fetching plans from Supabase...');
       final response = await client!
           .from('plans')
           .select()
           .eq('dm_id', dmId)
           .order('date', ascending: true);
 
-      return List<Map<String, dynamic>>.from(response);
-    } catch (e) {
+      final plans = List<Map<String, dynamic>>.from(response);
+      debugPrint('   ✅ Got ${plans.length} plan(s) from Supabase');
+      return plans;
+    } catch (e, stackTrace) {
+      debugPrint('   ❌ Error getting plans: $e');
+      debugPrint('   Stack trace: $stackTrace');
       throw Exception('Failed to get plans: $e');
     }
   }
@@ -802,16 +874,18 @@ class SupabaseService {
         debugPrint('   ❌ Supabase not initialized');
         return [];
       }
-      debugPrint('   Fetching from plans table...');
+      debugPrint('   🔄 Fetching all plans from plans table...');
       final response = await client!
           .from('plans')
           .select()
           .order('date', ascending: true);
 
-      debugPrint('   ✅ Got ${(response as List).length} plans from Supabase');
-      return List<Map<String, dynamic>>.from(response);
-    } catch (e) {
-      debugPrint('   ❌ Error: $e');
+      final plans = List<Map<String, dynamic>>.from(response);
+      debugPrint('   ✅ Got ${plans.length} plan(s) from Supabase');
+      return plans;
+    } catch (e, stackTrace) {
+      debugPrint('   ❌ Error getting all plans: $e');
+      debugPrint('   Stack trace: $stackTrace');
       throw Exception('Failed to get all plans: $e');
     }
   }
@@ -841,12 +915,24 @@ class SupabaseService {
       
       debugPrint('   ✅ User found: ${user['name']} (${user['role']})');
 
+      // Debug: Check password fields
+      final dbPassword = user['password']?.toString() ?? '';
+      final dbPasswordHash = user['password_hash']?.toString() ?? '';
+      debugPrint('   🔍 Password check:');
+      debugPrint('      Input password length: ${password.length}');
+      debugPrint('      DB password: ${dbPassword.isNotEmpty ? "${dbPassword.substring(0, dbPassword.length > 3 ? 3 : dbPassword.length)}..." : "null/empty"}');
+      debugPrint('      DB password_hash: ${dbPasswordHash.isNotEmpty ? "${dbPasswordHash.substring(0, dbPasswordHash.length > 3 ? 3 : dbPasswordHash.length)}..." : "null/empty"}');
+
       // In production, use password hashing (bcrypt)
       // For now, simple comparison (NOT SECURE - for development only)
-      if (user['password'] != password && user['password_hash'] != password) {
+      if (dbPassword != password && dbPasswordHash != password) {
         debugPrint('   ❌ Invalid password for user: $username');
+        debugPrint('      Expected: ${dbPassword.isNotEmpty ? dbPassword : (dbPasswordHash.isNotEmpty ? dbPasswordHash : "NO PASSWORD SET")}');
+        debugPrint('      Got: $password');
         throw Exception('اسم المستخدم أو كلمة المرور غير صحيحة');
       }
+      
+      debugPrint('   ✅ Password verified successfully');
 
       // Check if user is active
       if (user['status'] != 'active') {

@@ -1791,6 +1791,10 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
   }
 
   double _calculateAvgScore(CoachingReport report) {
+    // For Triple Visit, use combined average of DM and MR scores
+    if (report.typeOfVisit == 'Triple') {
+      return report.getTripleVisitScore();
+    }
     // For DM reports, use DM score calculation
     if (_isDMReport(report)) {
       return _calculateDMScore(report);

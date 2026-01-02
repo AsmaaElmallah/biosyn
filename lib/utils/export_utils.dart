@@ -44,22 +44,50 @@ class ExportUtils {
     setCell(1, row, report.date);
     row++;
     
+    // Coach Name - Handle Triple Visit correctly
     setCell(0, row, 'Coach:');
-    setCell(1, row, '${report.dmName}${report.coachRole != null ? ' (${report.coachRole!.toUpperCase()})' : ''}');
+    if (report.typeOfVisit == 'Triple' && isPMMSL) {
+      // For Triple Visit: use coachName if available (from model), otherwise use full role label
+      if (report.coachName != null && report.coachName!.isNotEmpty) {
+        // Use full role label like in View: "Medical Science Liaison (MSL)" or "Product Manager (PM)"
+        final roleLabel = report.coachRole == 'pm' 
+            ? 'Product Manager (PM)' 
+            : 'Medical Science Liaison (MSL)';
+        setCell(1, row, '$roleLabel: ${report.coachName}');
+      } else {
+        // Fallback: use full role label only
+        final roleLabel = report.coachRole == 'pm' 
+            ? 'Product Manager (PM)' 
+            : 'Medical Science Liaison (MSL)';
+        setCell(1, row, roleLabel);
+      }
+    } else {
+      // For other visits: dmName is the coach
+      setCell(1, row, '${report.dmName}${report.coachRole != null ? ' (${report.coachRole!.toUpperCase()})' : ''}');
+    }
     row++;
     
+    // Coached Person - Handle Triple Visit correctly
     setCell(0, row, 'Coached Person:');
-    final coachedPersonRole = isDMReport ? 'DM' : 'MR';
-    setCell(1, row, '${report.mrName} ($coachedPersonRole)');
+    if (report.typeOfVisit == 'Triple' && isPMMSL) {
+      // For Triple Visit: show both DM and MR
+      setCell(1, row, 'DM: ${report.dmName} & MR: ${report.mrName}');
+    } else {
+      final coachedPersonRole = isDMReport ? 'DM' : 'MR';
+      setCell(1, row, '${report.mrName} ($coachedPersonRole)');
+    }
     row++;
     
-    final avgScore = isDMReport ? report.getDMScore() : report.getAverageScore();
+    // Average Score - Handle Triple Visit correctly
+    final avgScore = (report.typeOfVisit == 'Triple' && isPMMSL) 
+        ? report.getTripleVisitScore() // For Triple, use combined average of DM and MR scores
+        : (isDMReport ? report.getDMScore() : report.getAverageScore());
     setCell(0, row, 'Average Score:');
     setCell(1, row, '${avgScore.toStringAsFixed(2)} / 6.0');
     row++;
     
-    // Brick Information (for all forms)
-    if (report.brickName != null || report.locationName != null) {
+    // Brick Information (for all forms) - Location data removed
+    if (report.brickName != null || report.visitCount != null || (report.doctorsVisited != null && report.doctorsVisited!.isNotEmpty)) {
       setCell(0, row, 'Brick Information:');
       sheet.merge(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row), 
                   CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row));
@@ -68,24 +96,6 @@ class ExportUtils {
       if (report.brickName != null) {
         setCell(0, row, 'Brick Name:');
         setCell(1, row, report.brickName!);
-        row++;
-      }
-      
-      if (report.locationName != null) {
-        setCell(0, row, 'Location Name:');
-        setCell(1, row, report.locationName!);
-        row++;
-      }
-      
-      if (report.brickLocationLat != null && report.brickLocationLng != null) {
-        setCell(0, row, 'Location Coordinates:');
-        setCell(1, row, '${report.brickLocationLat}, ${report.brickLocationLng}');
-        row++;
-      }
-      
-      if (report.googleMapsUrl != null && report.googleMapsUrl!.isNotEmpty) {
-        setCell(0, row, 'Google Maps URL:');
-        setCell(1, row, report.googleMapsUrl!);
         row++;
       }
       
@@ -101,6 +111,13 @@ class ExportUtils {
         row++;
       }
       
+      row++;
+    }
+    
+    // Location (Google Maps URL only)
+    if (report.googleMapsUrl != null && report.googleMapsUrl!.isNotEmpty) {
+      setCell(0, row, 'Location:');
+      setCell(1, row, report.googleMapsUrl!);
       row++;
     }
     
@@ -146,8 +163,9 @@ class ExportUtils {
       row++;
     }
     
-    // DM Feedback (for PM/MSL DM reports)
-    if (isDMReport) {
+    // DM Feedback - Show for DM reports OR Triple Visit (which contains both DM and MR feedback)
+    final isTripleVisit = report.typeOfVisit == 'Triple' && isPMMSL;
+    if (isDMReport || isTripleVisit) {
       setCell(0, row, 'DM FEEDBACK');
       sheet.merge(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row), 
                   CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row));
@@ -179,8 +197,8 @@ class ExportUtils {
       row++;
     }
     
-    // MR Feedback (for PM/MSL MR reports or DM/FT reports)
-    if (!isDMReport) {
+    // MR Feedback - Show for MR reports OR Triple Visit (which contains both DM and MR feedback)
+    if (!isDMReport || isTripleVisit) {
       if (isPMMSL) {
         setCell(0, row, 'MR FEEDBACK');
         sheet.merge(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row), 
@@ -507,13 +525,21 @@ class ExportUtils {
     setCell(27, row, 'Areas of Improvement');
     setCell(28, row, 'Filled with MR');
     setCell(29, row, 'Brick Name');
-    setCell(30, row, 'Location Name');
+    setCell(30, row, 'Location');
     setCell(31, row, 'Visit Count');
     setCell(32, row, 'Doctors Visited');
     row++;
     
     // Data rows
     for (final report in monthlyReports) {
+      final isPMMSL = report.coachRole == 'pm' || report.coachRole == 'msl';
+      final isTripleVisit = report.typeOfVisit == 'Triple' && isPMMSL;
+      
+      // Get coach name - for Triple Visit use coachName, otherwise use dmName
+      final coachName = isTripleVisit && report.coachName != null && report.coachName!.isNotEmpty
+          ? report.coachName!
+          : report.dmName;
+      
       final score = report.getAverageScore().toStringAsFixed(2);
       final strengths = (report.strengths ?? '').replaceAll('\n', ' ');
       final strengthsShort = strengths.length > 200 ? '${strengths.substring(0, 200)}...' : strengths;
@@ -521,7 +547,7 @@ class ExportUtils {
       final improvementsShort = improvements.length > 200 ? '${improvements.substring(0, 200)}...' : improvements;
       
       setCell(0, row, report.date);
-      setCell(1, row, report.dmName);
+      setCell(1, row, coachName);
       setCell(2, row, report.coachRole ?? 'dm');
       setCell(3, row, report.mrName);
       setCell(4, row, report.mrId);
@@ -550,7 +576,7 @@ class ExportUtils {
       setCell(27, row, improvementsShort);
       setCell(28, row, report.filledWithMR ?? '');
       setCell(29, row, report.brickName ?? '');
-      setCell(30, row, report.locationName ?? '');
+      setCell(30, row, report.googleMapsUrl ?? '');
       setCell(31, row, report.visitCount?.toString() ?? '');
       setCell(32, row, report.doctorsVisited ?? '');
       row++;
@@ -637,7 +663,7 @@ class ExportUtils {
     setCell(27, row, 'Areas of Improvement');
     setCell(28, row, 'Filled with MR');
     setCell(29, row, 'Brick Name');
-    setCell(30, row, 'Location Name');
+    setCell(30, row, 'Location');
     setCell(31, row, 'Visit Count');
     setCell(32, row, 'Doctors Visited');
     setCell(33, row, 'Type of Visit');
@@ -658,6 +684,13 @@ class ExportUtils {
     for (final report in reports) {
       final isPMMSL = report.coachRole == 'pm' || report.coachRole == 'msl';
       final isDMReport = isPMMSL && (report.customerAwareness != null || report.medicalProductKnowledgeDM != null);
+      final isTripleVisit = report.typeOfVisit == 'Triple' && isPMMSL;
+      
+      // Get coach name - for Triple Visit use coachName, otherwise use dmName
+      final coachName = isTripleVisit && report.coachName != null && report.coachName!.isNotEmpty
+          ? report.coachName!
+          : report.dmName;
+      
       final score = isDMReport ? report.getDMScore().toStringAsFixed(2) : report.getAverageScore().toStringAsFixed(2);
       final strengths = (report.strengths ?? '').replaceAll('\n', ' ');
       final strengthsShort = strengths.length > 200 ? '${strengths.substring(0, 200)}...' : strengths;
@@ -671,7 +704,7 @@ class ExportUtils {
       final mrFeedbackCommentsShort = mrFeedbackComments.length > 200 ? '${mrFeedbackComments.substring(0, 200)}...' : mrFeedbackComments;
       
       setCell(0, row, report.date);
-      setCell(1, row, report.dmName);
+      setCell(1, row, coachName);
       setCell(2, row, report.coachRole ?? 'dm');
       setCell(3, row, report.mrName);
       setCell(4, row, report.mrId);
@@ -700,7 +733,7 @@ class ExportUtils {
       setCell(27, row, improvementsShort);
       setCell(28, row, report.filledWithMR ?? '');
       setCell(29, row, report.brickName ?? report.areaBrickName ?? '');
-      setCell(30, row, report.locationName ?? '');
+      setCell(30, row, report.googleMapsUrl ?? '');
       setCell(31, row, report.visitCount?.toString() ?? '');
       setCell(32, row, report.doctorsVisited ?? '');
       setCell(33, row, report.typeOfVisit ?? '');

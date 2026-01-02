@@ -158,35 +158,120 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
       _isSubmitting = true;
     });
 
-    // Capture location automatically (silently, user doesn't know)
+    // Verify Location Services and Permission before allowing submit
+    // User should not know we're taking location - show generic "Verifying..." message
     double? lat;
     double? lng;
     String? locationName;
     String? googleMapsUrl;
     
     try {
+      // Step 1: Check if Location Services are enabled
+      debugPrint('📍 Step 1: Checking Location Services...');
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (serviceEnabled) {
-        LocationPermission permission = await Geolocator.checkPermission();
-        if (permission == LocationPermission.denied) {
-          permission = await Geolocator.requestPermission();
+      if (!serviceEnabled) {
+        debugPrint('❌ Location Services are disabled');
+        if (mounted) {
+          setState(() {
+            _isSubmitting = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('يرجى تفعيل خدمات الموقع من إعدادات الهاتف'),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+        return;
+      }
+      debugPrint('✅ Location Services are enabled');
+      
+      // Step 2: Check and request permission if needed
+      debugPrint('📍 Step 2: Checking Location Permission...');
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        debugPrint('⚠️ Location permission denied, requesting...');
+        permission = await Geolocator.requestPermission();
+      }
+      
+      // Step 3: Verify permission is granted
+      if (permission != LocationPermission.whileInUse && permission != LocationPermission.always) {
+        debugPrint('❌ Location permission not granted: $permission');
+        if (mounted) {
+          setState(() {
+            _isSubmitting = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('يرجى السماح بالوصول للموقع من إعدادات التطبيق'),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+        return;
+      }
+      debugPrint('✅ Location Permission granted: $permission');
+      
+      // Step 4: Try to get current location with timeout
+      debugPrint('📍 Step 4: Attempting to get current location...');
+      try {
+        Position position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+          timeLimit: const Duration(seconds: 10), // 10 second timeout
+        );
+        
+        // Verify location accuracy (optional - can be removed if too strict)
+        if (position.accuracy > 100) {
+          debugPrint('⚠️ Location accuracy is low: ${position.accuracy}m');
+          // Still accept it, but log a warning
         }
         
-        if (permission == LocationPermission.whileInUse || permission == LocationPermission.always) {
-          Position position = await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.high,
+        lat = position.latitude;
+        lng = position.longitude;
+        locationName = 'Location at ${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}';
+        googleMapsUrl = 'https://www.google.com/maps?q=$lat,$lng';
+        
+        debugPrint('✅ Location captured successfully: $lat, $lng');
+      } catch (e) {
+        // Location capture failed - GPS not available
+        debugPrint('❌ Failed to get location: $e');
+        if (mounted) {
+          setState(() {
+            _isSubmitting = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('يرجى الانتظار حتى يتوفر GPS أو تحقق من إعدادات الموقع'),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 4),
+            ),
           );
-          
-          lat = position.latitude;
-          lng = position.longitude;
-          locationName = 'Location at ${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}';
-          googleMapsUrl = 'https://www.google.com/maps?q=$lat,$lng';
         }
+        return;
       }
-    } catch (e) {
-      // Location capture failed - continue without location
-      debugPrint('Failed to capture location: $e');
+    } catch (e, stackTrace) {
+      // Unexpected error
+      debugPrint('❌ Unexpected error checking location: $e');
+      debugPrint('Stack trace: $stackTrace');
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('حدث خطأ في التحقق من الموقع. يرجى المحاولة مرة أخرى'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
+      return;
     }
+    
+    // Location verified successfully - continue with report submission
+    debugPrint('✅ Location verification passed, proceeding with report submission...');
 
     // Get DM and MR names from widget (passed from previous screen)
     final selectedDMName = widget.dmName ?? '';
@@ -433,6 +518,8 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
         mrId: _formData['mrId'] ?? widget.mrId ?? '', // MR ID
         mrName: selectedMRName, // MR name
         coachRole: widget.coachRole,
+        coachId: widget.coachId, // Coach ID (PM/MSL who is coaching)
+        coachName: widget.coachName, // Coach Name (PM/MSL who is coaching)
         // Brick Information
         brickName: _formData['areaBrickName'],
         brickLocationLat: lat,

@@ -7,6 +7,9 @@ class CoachingReport {
   
   // Coach Role (dm, ft, pm, msl)
   final String? coachRole;
+  // Coach ID and Name (for Triple Visit - to identify the actual coach, not the coached DM)
+  final String? coachId;
+  final String? coachName;
   
   // Brick Information (for all forms)
   final String? brickName;
@@ -67,6 +70,8 @@ class CoachingReport {
     required this.mrId,
     required this.mrName,
     this.coachRole,
+    this.coachId,
+    this.coachName,
     this.brickName,
     this.brickLocationLat,
     this.brickLocationLng,
@@ -121,6 +126,8 @@ class CoachingReport {
       'mrId': mrId,
       'mrName': mrName,
       'coachRole': coachRole,
+      'coachId': coachId,
+      'coachName': coachName,
       'brickName': brickName,
       'brickLocationLat': brickLocationLat,
       'brickLocationLng': brickLocationLng,
@@ -176,6 +183,8 @@ class CoachingReport {
       mrId: json['mrId'] ?? '',
       mrName: json['mrName'] ?? '',
       coachRole: json['coachRole'],
+      coachId: json['coachId'],
+      coachName: json['coachName'],
       brickName: json['brickName'],
       brickLocationLat: json['brickLocationLat'] != null ? double.tryParse(json['brickLocationLat'].toString()) : null,
       brickLocationLng: json['brickLocationLng'] != null ? double.tryParse(json['brickLocationLng'].toString()) : null,
@@ -232,6 +241,8 @@ class CoachingReport {
       mrId: json['mr_id']?.toString() ?? '',
       mrName: json['mr_name']?.toString() ?? '',
       coachRole: json['coach_role']?.toString(),
+      coachId: json['coach_id']?.toString(),
+      coachName: json['coach_name']?.toString(),
       brickName: json['brick_name']?.toString(),
       brickLocationLat: json['brick_location_lat'] != null ? double.tryParse(json['brick_location_lat'].toString()) : null,
       brickLocationLng: json['brick_location_lng'] != null ? double.tryParse(json['brick_location_lng'].toString()) : null,
@@ -353,6 +364,24 @@ class CoachingReport {
     }
     
     return count > 0 ? totalScore / count : 0.0;
+  }
+
+  /// Calculate combined average score for Triple Visit (DM + MR scores)
+  /// Returns average of DM score and MR score if both exist, otherwise returns the available score
+  double getTripleVisitScore() {
+    final dmScore = getDMScore();
+    final mrScore = getAverageScore();
+    
+    // If both scores exist, return average
+    if (dmScore > 0 && mrScore > 0) {
+      return (dmScore + mrScore) / 2.0;
+    }
+    
+    // If only one score exists, return it
+    if (dmScore > 0) return dmScore;
+    if (mrScore > 0) return mrScore;
+    
+    return 0.0;
   }
 }
 

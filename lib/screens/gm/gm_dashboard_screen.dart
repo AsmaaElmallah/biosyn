@@ -39,18 +39,30 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
   Map<String, String> _coachNames = {}; // Map of coach ID -> coach name
   int _unreadNotificationsCount = 0;
   Timer? _notificationsTimer;
+  int _totalCoaches = 0; // Total coaches count from users table
+  int _totalMRs = 0; // Total MRs count from users table
 
   @override
   void initState() {
     super.initState();
     _loadCoachProfiles();
     _loadCoachNames();
+    _loadUsersCount(); // Load total coaches and MRs count from users table
     if (widget.gmId != null) {
       _loadUnreadNotificationsCount();
       // Refresh notifications count every 30 seconds
       _notificationsTimer = Timer.periodic(const Duration(seconds: 30), (_) {
         _loadUnreadNotificationsCount();
       });
+    }
+  }
+
+  @override
+  void didUpdateWidget(GMDashboardScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Reload users count when widget updates (e.g., when reports are refreshed)
+    if (oldWidget.allReports.length != widget.allReports.length) {
+      _loadUsersCount();
     }
   }
 
@@ -151,6 +163,58 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
       }
     } catch (e) {
       debugPrint('   ❌ Error loading coach names: $e');
+    }
+  }
+
+  /// Load total coaches and MRs count from users table (not from reports)
+  /// This ensures accurate count from users table, not from reports
+  Future<void> _loadUsersCount() async {
+    try {
+      debugPrint('📊 Loading users count from users table...');
+      debugPrint('   🔍 Fetching all coaches and MRs from users table...');
+      
+      // Get all coaches (DM, FT, PM, MSL) from users table
+      // These functions query users table with role filter and status = 'active'
+      final dms = await SupabaseService.getAllDMs();
+      final fts = await SupabaseService.getAllFTs();
+      final pms = await SupabaseService.getAllPMs();
+      final msls = await SupabaseService.getAllMSLs();
+      
+      // Get all MRs from users table
+      // This function queries users table with role = 'mr' and status = 'active'
+      final mrs = await SupabaseService.getAllMRs();
+      
+      // Calculate total coaches count (DM + FT + PM + MSL)
+      final totalCoaches = dms.length + fts.length + pms.length + msls.length;
+      
+      // Calculate total MRs count
+      final totalMRs = mrs.length;
+      
+      debugPrint('   📊 Users count from users table:');
+      debugPrint('      - DMs: ${dms.length}');
+      debugPrint('      - FTs: ${fts.length}');
+      debugPrint('      - PMs: ${pms.length}');
+      debugPrint('      - MSLs: ${msls.length}');
+      debugPrint('      - Total Coaches: $totalCoaches');
+      debugPrint('      - Total MRs: $totalMRs');
+      
+      if (mounted) {
+        setState(() {
+          _totalCoaches = totalCoaches;
+          _totalMRs = totalMRs;
+        });
+        debugPrint('   ✅ Updated state: _totalCoaches=$_totalCoaches, _totalMRs=$_totalMRs');
+      }
+    } catch (e, stackTrace) {
+      debugPrint('   ❌ Error loading users count: $e');
+      debugPrint('   Stack trace: $stackTrace');
+      // Set to 0 on error
+      if (mounted) {
+        setState(() {
+          _totalCoaches = 0;
+          _totalMRs = 0;
+        });
+      }
     }
   }
 
@@ -269,41 +333,96 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
       if (isPMMSL) {
         // For PM/MSL reports:
         // - In Single/Double visits: dmId contains the coach ID
-        // - In Triple visits: dmId contains the coached DM ID, so we need to find the coach ID from other reports
+        // - In Triple visits: use coachId and coachName directly from model if available
         if (report.typeOfVisit == 'Triple') {
-          // For Triple Visit, try to find coach ID from Single/Double visits with same coachRole
-          // Use the first available coach ID for this role that has a name in cache
-          final coachIdsForRole = coachIdsByRole[coachRole] ?? <String>{};
-          coachId = coachIdsForRole.firstWhere(
-            (id) => _coachNames.containsKey(id) && _coachNames[id]!.isNotEmpty,
-            orElse: () => coachIdsForRole.isNotEmpty ? coachIdsForRole.first : '',
-          );
+          // For Triple Visit: use coachId directly from model if available
+          // If not available (from Supabase), find it from Single/Double visits with same coachRole
+          if (report.coachId != null && report.coachId!.isNotEmpty) {
+            coachId = report.coachId;
+            debugPrint('   ✅ Triple Visit: Using coachId from model: $coachId');
+          } else {
+            // Fallback: try to find coach ID from Single/Double visits with same coachRole
+            // This is necessary because coach_id is not stored in database
+            final coachIdsForRole = coachIdsByRole[coachRole] ?? <String>{};
+            if (coachIdsForRole.isNotEmpty) {
+              // Prefer coach ID that has a name in cache
+              coachId = coachIdsForRole.firstWhere(
+                (id) => _coachNames.containsKey(id) && _coachNames[id]!.isNotEmpty,
+                orElse: () => coachIdsForRole.first,
+              );
+              debugPrint('   ✅ Triple Visit: Found coachId from Single/Double visits: $coachId');
+            } else {
+              // If no coach IDs found for this role, try to get from any Single/Double report with same coachRole
+              // Also check if there are any other Triple visits with the same coachRole that might have coachId
+              String? foundCoachId;
+              
+              // First, try to find from Single/Double reports
+              final similarReport = allCoachReports.firstWhere(
+                (r) => r.coachRole == coachRole && 
+                       r.typeOfVisit != 'Triple' && 
+                       r.dmId.isNotEmpty &&
+                       r.dmId != report.dmId, // Make sure it's not the same as the coached DM
+                orElse: () => report,
+              );
+              if (similarReport.dmId.isNotEmpty && similarReport.dmId != report.dmId) {
+                foundCoachId = similarReport.dmId;
+                debugPrint('   ✅ Triple Visit: Found coachId from Single/Double report: $foundCoachId');
+              }
+              
+              // If still not found, try to find from other Triple visits that have coachId in model
+              if (foundCoachId == null || foundCoachId.isEmpty) {
+                final tripleWithCoachId = allCoachReports.firstWhere(
+                  (r) => r.coachRole == coachRole && 
+                         r.typeOfVisit == 'Triple' && 
+                         r.coachId != null && 
+                         r.coachId!.isNotEmpty &&
+                         r.coachId != report.dmId, // Make sure it's not the same as the coached DM
+                  orElse: () => report,
+                );
+                if (tripleWithCoachId.coachId != null && tripleWithCoachId.coachId!.isNotEmpty && tripleWithCoachId.coachId != report.dmId) {
+                  foundCoachId = tripleWithCoachId.coachId;
+                  debugPrint('   ✅ Triple Visit: Found coachId from another Triple visit: $foundCoachId');
+                }
+              }
+              
+              if (foundCoachId != null && foundCoachId.isNotEmpty) {
+                coachId = foundCoachId;
+              } else {
+                debugPrint('   ⚠️ Triple Visit: Could not find coachId for role $coachRole, dmId=${report.dmId}');
+              }
+            }
+          }
           
-          // If still not found, try to get from any Single/Double report with same coachRole
-          if (coachId.isEmpty) {
-            final similarReport = allCoachReports.firstWhere(
-              (r) => r.coachRole == coachRole && 
-                     r.typeOfVisit != 'Triple' && 
-                     r.dmId.isNotEmpty,
-              orElse: () => report,
-            );
-            coachId = similarReport.dmId;
+          // Get coach name - use coachName directly from model if available
+          // For Triple Visit, NEVER use dmName as it's the coached DM, not the coach
+          if (report.coachName != null && report.coachName!.isNotEmpty) {
+            // Use coachName from model (available when report is created locally)
+            coachName = '${report.coachName} (${coachRole.toUpperCase()})';
+            // Cache it for future use
+            if (coachId != null && coachId.isNotEmpty) {
+              _coachNames[coachId] = report.coachName!;
+              debugPrint('   ✅ Triple Visit: Using coachName from model: ${report.coachName}, cached for coachId: $coachId');
+            }
+          } else if (coachId != null && coachId.isNotEmpty && _coachNames.containsKey(coachId) && _coachNames[coachId]!.isNotEmpty) {
+            // Use cached name
+            coachName = '${_coachNames[coachId]} (${coachRole.toUpperCase()})';
+            debugPrint('   ✅ Triple Visit: Using cached coachName: ${_coachNames[coachId]}');
+          } else if (coachId != null && coachId.isNotEmpty) {
+            // If coachId is available but not in cache, use placeholder
+            // The actual name will be fetched in the UI (FutureBuilder) to avoid blocking
+            debugPrint('   ⚠️ Triple Visit: coachId available but not in cache, will fetch in UI. coachId: $coachId, role: $coachRole');
+            coachName = 'Coach (${coachRole.toUpperCase()})';
+          } else {
+            // Fallback: use placeholder (never use dmName for Triple Visit)
+            debugPrint('   ⚠️ Triple Visit: No coachId available, using placeholder. dmId=${report.dmId}, dmName=${report.dmName}');
+            coachName = 'Coach (${coachRole.toUpperCase()})';
           }
         } else {
           // For Single/Double visits, dmId contains the coach ID
           coachId = report.dmId;
-        }
-        
-        // Get coach name from cache or use dmName as fallback
-        if (coachId.isNotEmpty && _coachNames.containsKey(coachId) && _coachNames[coachId]!.isNotEmpty) {
-          coachName = '${_coachNames[coachId]} (${coachRole.toUpperCase()})';
-        } else {
-          // Fallback: for Triple visits, don't use dmName (it's the coached DM name)
-          // Instead, try to fetch from Supabase or use a placeholder
-          if (report.typeOfVisit == 'Triple') {
-            // For Triple Visit, we can't use dmName as it's the coached DM
-            // We'll use a placeholder that will be updated when coach names are loaded
-            coachName = 'Coach (${coachRole.toUpperCase()})';
+          // Get coach name from cache or use dmName as fallback
+          if (coachId.isNotEmpty && _coachNames.containsKey(coachId) && _coachNames[coachId]!.isNotEmpty) {
+            coachName = '${_coachNames[coachId]} (${coachRole.toUpperCase()})';
           } else {
             coachName = report.dmName.isNotEmpty 
                 ? '${report.dmName} (${coachRole.toUpperCase()})'
@@ -510,8 +629,19 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
     final mrReports = allReports.where((r) => r.mrId.isNotEmpty).toList();
     
     final totalVisits = mrReports.length;
-    final totalDMs = mrReports.map((r) => r.dmId).where((id) => id.isNotEmpty).toSet().length;
-    final totalMRs = mrReports.map((r) => r.mrId).where((id) => id.isNotEmpty).toSet().length;
+    
+    // Use counts from users table (loaded in _loadUsersCount) instead of from reports
+    // This ensures accurate count even when there are no reports yet
+    // These values are loaded from users table in _loadUsersCount():
+    // - _totalCoaches = count of all users with role in ['dm', 'ft', 'pm', 'msl'] and status = 'active'
+    // - _totalMRs = count of all users with role = 'mr' and status = 'active'
+    final totalDMs = _totalCoaches; // Total coaches from users table (DM + FT + PM + MSL)
+    final totalMRs = _totalMRs; // Total MRs from users table
+    
+    debugPrint('📊 Dashboard build - Counts:');
+    debugPrint('   - Total Visits: $totalVisits (from reports)');
+    debugPrint('   - Total Coaches: $totalDMs (from users table: $_totalCoaches)');
+    debugPrint('   - Total MRs: $totalMRs (from users table: $_totalMRs)');
     
     final allScores = mrReports
         .map((r) => _calculateAvgScore(r))
@@ -1088,13 +1218,56 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
                                                           child: FutureBuilder<String?>(
                                                             future: () async {
                                                               final coachId = dm['coachId'] as String?;
+                                                              final role = dm['role'] as String?;
+                                                              debugPrint('   🔍 GM Dashboard: Fetching coach name for coachId: $coachId, role: $role');
+                                                              // For Triple Visit reports, coachId should already be the correct MSL/PM ID
+                                                              // But we need to fetch the name from Supabase to ensure it's correct
                                                               if (coachId != null && coachId.isNotEmpty) {
-                                                                return await _getCoachName(coachId, dm['role'] as String?);
+                                                                // First check cache
+                                                                if (_coachNames.containsKey(coachId)) {
+                                                                  debugPrint('   ✅ GM Dashboard: Found coach name in cache: ${_coachNames[coachId]}');
+                                                                  return _coachNames[coachId];
+                                                                }
+                                                                // Then fetch from Supabase
+                                                                debugPrint('   🔍 GM Dashboard: Fetching coach name from Supabase for coachId: $coachId');
+                                                                final fetchedName = await _getCoachName(coachId, role);
+                                                                if (fetchedName != null && fetchedName.isNotEmpty) {
+                                                                  debugPrint('   ✅ GM Dashboard: Fetched coach name from Supabase: $fetchedName');
+                                                                  return fetchedName;
+                                                                } else {
+                                                                  debugPrint('   ⚠️ GM Dashboard: Could not fetch coach name from Supabase');
+                                                                }
+                                                              } else {
+                                                                debugPrint('   ⚠️ GM Dashboard: coachId is null or empty');
                                                               }
                                                               return null;
                                                             }(),
                                                             builder: (context, snapshot) {
-                                                              final actualCoachName = snapshot.data ?? (dm['fullName'] ?? dm['name']) as String;
+                                                              // For Triple Visit: use fetched name from Supabase only (never use dm['fullName'] as it might be DM name)
+                                                              // The fetched name is the correct MSL/PM name fetched using coachId
+                                                              if (snapshot.connectionState == ConnectionState.waiting) {
+                                                                return const Text(
+                                                                  'Loading...',
+                                                                  style: TextStyle(
+                                                                    fontSize: 16,
+                                                                    fontWeight: FontWeight.w600,
+                                                                    color: AppColors.gray900,
+                                                                  ),
+                                                                );
+                                                              }
+                                                              final actualCoachName = snapshot.data;
+                                                              if (actualCoachName == null || actualCoachName.isEmpty) {
+                                                                // If fetch failed, use coachId to identify (never use dm['fullName'])
+                                                                final role = dm['role'] as String?;
+                                                                return Text(
+                                                                  'Coach (${role?.toUpperCase() ?? 'Unknown'})',
+                                                                  style: const TextStyle(
+                                                                    fontSize: 16,
+                                                                    fontWeight: FontWeight.w600,
+                                                                    color: AppColors.gray900,
+                                                                  ),
+                                                                );
+                                                              }
                                                               return Text(
                                                                 actualCoachName,
                                                                 style: const TextStyle(
