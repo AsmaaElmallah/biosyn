@@ -11,23 +11,24 @@ import 'package:biosyn_report_flutter/utils/responsive.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-class GMNotificationsScreen extends StatefulWidget {
-  final String gmId;
+/// Shared notifications screen for all user roles (DM, FT, PM, MSL, GM)
+class NotificationsScreen extends StatefulWidget {
+  final String userId;
   final String activeTab;
   final Function(String) onTabChange;
 
-  const GMNotificationsScreen({
+  const NotificationsScreen({
     super.key,
-    required this.gmId,
+    required this.userId,
     required this.activeTab,
     required this.onTabChange,
   });
 
   @override
-  State<GMNotificationsScreen> createState() => _GMNotificationsScreenState();
+  State<NotificationsScreen> createState() => _NotificationsScreenState();
 }
 
-class _GMNotificationsScreenState extends State<GMNotificationsScreen> {
+class _NotificationsScreenState extends State<NotificationsScreen> {
   List<Map<String, dynamic>> _notifications = [];
   bool _isLoading = true;
   String? _error;
@@ -45,10 +46,9 @@ class _GMNotificationsScreenState extends State<GMNotificationsScreen> {
     });
 
     try {
-      debugPrint('📱 GMNotificationsScreen: Loading ALL notifications for GM');
-      // GM should see ALL notifications from all users, not just their own
-      final notifications = await SupabaseService.getAllNotifications();
-      debugPrint('📱 GMNotificationsScreen: Received ${notifications.length} notifications');
+      debugPrint('📱 NotificationsScreen: Loading notifications for user ID: ${widget.userId}');
+      final notifications = await SupabaseService.getNotifications(widget.userId);
+      debugPrint('📱 NotificationsScreen: Received ${notifications.length} notifications');
       
       setState(() {
         _notifications = notifications;
@@ -56,10 +56,10 @@ class _GMNotificationsScreenState extends State<GMNotificationsScreen> {
       });
       
       if (notifications.isEmpty) {
-        debugPrint('⚠️ GMNotificationsScreen: No notifications found');
+        debugPrint('⚠️ NotificationsScreen: No notifications found');
       }
     } catch (e) {
-      debugPrint('❌ GMNotificationsScreen: Error loading notifications: $e');
+      debugPrint('❌ NotificationsScreen: Error loading notifications: $e');
       setState(() {
         _error = e.toString();
         _isLoading = false;
@@ -83,7 +83,7 @@ class _GMNotificationsScreenState extends State<GMNotificationsScreen> {
 
   Future<void> _markAllAsRead() async {
     try {
-      await SupabaseService.markAllNotificationsAsRead(widget.gmId);
+      await SupabaseService.markAllNotificationsAsRead(widget.userId);
       // Reload notifications
       await _loadNotifications();
       if (mounted) {
@@ -110,6 +110,8 @@ class _GMNotificationsScreenState extends State<GMNotificationsScreen> {
         return 'Product Manager';
       case 'msl':
         return 'Medical Science Liaison';
+      case 'gm':
+        return 'General Manager';
       default:
         return 'Coach';
     }

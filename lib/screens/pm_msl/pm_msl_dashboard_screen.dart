@@ -9,6 +9,7 @@ import 'package:biosyn_report_flutter/widgets/sync_status_indicator.dart';
 import 'package:biosyn_report_flutter/models/coaching_report.dart';
 import 'package:biosyn_report_flutter/services/supabase_service.dart';
 import 'package:biosyn_report_flutter/utils/export_utils.dart';
+import 'package:biosyn_report_flutter/screens/shared/notifications_screen.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
@@ -54,6 +55,8 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
   int _profileRetryCount = 0;
   int _rolesRetryCount = 0;
   static const int _maxRetries = 3;
+  int _unreadNotificationsCount = 0;
+  Timer? _notificationsTimer;
 
   @override
   void initState() {
@@ -65,6 +68,52 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
     _currentReports = List.from(widget.reports);
     _initializeData();
     _startRealtimeUpdates();
+    if (widget.coachId != null) {
+      _loadUnreadNotificationsCount();
+      // Refresh notifications count every 30 seconds
+      _notificationsTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+        _loadUnreadNotificationsCount();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _notificationsTimer?.cancel();
+    _reportsSubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadUnreadNotificationsCount() async {
+    if (widget.coachId == null) return;
+    
+    try {
+      final count = await SupabaseService.getUnreadNotificationsCount(widget.coachId!);
+      if (mounted) {
+        setState(() {
+          _unreadNotificationsCount = count;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading unread notifications count: $e');
+    }
+  }
+
+  void _openNotifications() {
+    if (widget.coachId == null) return;
+    
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => NotificationsScreen(
+          userId: widget.coachId!,
+          activeTab: widget.activeTab,
+          onTabChange: widget.onTabChange,
+        ),
+      ),
+    ).then((_) {
+      // Refresh count when returning from notifications screen
+      _loadUnreadNotificationsCount();
+    });
   }
 
   /// Initialize all data loading operations with proper error handling
@@ -743,12 +792,6 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
   }
 
   @override
-  void dispose() {
-    _reportsSubscription?.cancel();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final reports = _currentReports.isNotEmpty ? _currentReports : widget.reports;
     debugPrint('📊 Dashboard build: Using ${reports.length} reports (current: ${_currentReports.length}, widget: ${widget.reports.length})');
@@ -779,6 +822,45 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                   subtitle: widget.coachRole == 'pm' 
                       ? 'Product Manager performance overview'
                       : 'Medical Science Liaison performance overview',
+                  trailing: widget.coachId != null
+                      ? Stack(
+                          children: [
+                            IconButton(
+                              icon: const Icon(
+                                Icons.notifications_outlined,
+                                color: Colors.white,
+                                size: 28,
+                              ),
+                              onPressed: _openNotifications,
+                            ),
+                            if (_unreadNotificationsCount > 0)
+                              Positioned(
+                                right: 8,
+                                top: 8,
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: const BoxDecoration(
+                                    color: Colors.red,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  constraints: const BoxConstraints(
+                                    minWidth: 16,
+                                    minHeight: 16,
+                                  ),
+                                  child: Text(
+                                    _unreadNotificationsCount > 9 ? '9+' : '$_unreadNotificationsCount',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        )
+                      : null,
                 ),
                 // Content
                 Expanded(
@@ -3021,10 +3103,22 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                               child: InkWell(
                                 onTap: () async {
                                   try {
-                                    await ExportUtils.exportSingleReportToText(report);
+                                    final filePath = await ExportUtils.exportSingleReportToText(report);
                                     if (mounted) {
                                       ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('Report exported successfully!')),
+                                        SnackBar(
+                                          content: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text('✅ Report exported successfully!', style: TextStyle(fontWeight: FontWeight.bold)),
+                                              SizedBox(height: 4),
+                                              Text('📁 Location:', style: TextStyle(fontSize: 12)),
+                                              Text(filePath, style: TextStyle(fontSize: 11, color: Colors.white70)),
+                                            ],
+                                          ),
+                                          duration: const Duration(seconds: 6),
+                                        ),
                                       );
                                     }
                                   } catch (e) {

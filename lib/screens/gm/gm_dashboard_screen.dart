@@ -12,6 +12,7 @@ import 'package:biosyn_report_flutter/models/coaching_report.dart';
 import 'package:biosyn_report_flutter/services/supabase_service.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/foundation.dart';
+import 'package:intl/intl.dart';
 import 'dart:async';
 
 class GMDashboardScreen extends StatefulWidget {
@@ -41,6 +42,12 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
   Timer? _notificationsTimer;
   int _totalCoaches = 0; // Total coaches count from users table
   int _totalMRs = 0; // Total MRs count from users table
+  
+  // Date filtering (like Plans)
+  DateTime _selectedMonth = DateTime.now();
+  DateTime? _startDate;
+  DateTime? _endDate;
+  bool _useDateRange = false;
 
   @override
   void initState() {
@@ -102,6 +109,318 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
       // Refresh count when returning from notifications screen
       _loadUnreadNotificationsCount();
     });
+  }
+  
+  void _previousMonth() {
+    setState(() {
+      _selectedMonth = DateTime(_selectedMonth.year, _selectedMonth.month - 1, 1);
+    });
+  }
+
+  void _nextMonth() {
+    setState(() {
+      _selectedMonth = DateTime(_selectedMonth.year, _selectedMonth.month + 1, 1);
+    });
+  }
+  
+  /// Get filtered reports based on date filter
+  List<CoachingReport> _getFilteredReports() {
+    var reports = widget.allReports;
+    
+    // Filter by date range or month
+    if (_useDateRange && _startDate != null && _endDate != null) {
+      // Filter by date range
+      reports = reports.where((r) {
+        if (r.date.isEmpty) return false;
+        try {
+          final reportDate = DateTime.parse(r.date);
+          final reportDateOnly = DateTime(reportDate.year, reportDate.month, reportDate.day);
+          final startOnly = DateTime(_startDate!.year, _startDate!.month, _startDate!.day);
+          final endOnly = DateTime(_endDate!.year, _endDate!.month, _endDate!.day);
+          return reportDateOnly.isAtSameMomentAs(startOnly) || 
+                 reportDateOnly.isAtSameMomentAs(endOnly) ||
+                 (reportDateOnly.isAfter(startOnly) && reportDateOnly.isBefore(endOnly));
+        } catch (e) {
+          return false;
+        }
+      }).toList();
+    } else {
+      // Filter by selected month
+      final monthStart = DateTime(_selectedMonth.year, _selectedMonth.month, 1);
+      final monthEnd = DateTime(_selectedMonth.year, _selectedMonth.month + 1, 0);
+      
+      reports = reports.where((r) {
+        if (r.date.isEmpty) return false;
+        try {
+          final reportDate = DateTime.parse(r.date);
+          final reportDateOnly = DateTime(reportDate.year, reportDate.month, reportDate.day);
+          return reportDateOnly.isAfter(monthStart.subtract(const Duration(days: 1))) &&
+                 reportDateOnly.isBefore(monthEnd.add(const Duration(days: 1)));
+        } catch (e) {
+          return false;
+        }
+      }).toList();
+    }
+    
+    return reports;
+  }
+  
+  Widget _buildDateSelector() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.date_range, color: AppColors.primaryBlue, size: 20),
+              const SizedBox(width: 8),
+              const Text(
+                'Filter by Date',
+                style: TextStyle(
+                  color: AppColors.gray700,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Toggle between Month and Date Range
+          Row(
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _useDateRange = false;
+                    });
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: !_useDateRange ? AppColors.primaryBlue.withOpacity(0.1) : AppColors.gray50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: !_useDateRange ? AppColors.primaryBlue : AppColors.gray200,
+                        width: !_useDateRange ? 2 : 1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.calendar_month,
+                          size: 16,
+                          color: !_useDateRange ? AppColors.primaryBlue : AppColors.gray600,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Month',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: !_useDateRange ? FontWeight.w600 : FontWeight.normal,
+                            color: !_useDateRange ? AppColors.primaryBlue : AppColors.gray600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _useDateRange = true;
+                    });
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: _useDateRange ? AppColors.primaryBlue.withOpacity(0.1) : AppColors.gray50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: _useDateRange ? AppColors.primaryBlue : AppColors.gray200,
+                        width: _useDateRange ? 2 : 1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.date_range,
+                          size: 16,
+                          color: _useDateRange ? AppColors.primaryBlue : AppColors.gray600,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Date Range',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: _useDateRange ? FontWeight.w600 : FontWeight.normal,
+                            color: _useDateRange ? AppColors.primaryBlue : AppColors.gray600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Month selector or Date range selector
+          if (!_useDateRange)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                IconButton(
+                  onPressed: _previousMonth,
+                  icon: const Icon(Icons.chevron_left, color: AppColors.primaryBlue),
+                ),
+                Text(
+                  DateFormat('MMMM yyyy').format(_selectedMonth),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.gray700,
+                  ),
+                ),
+                IconButton(
+                  onPressed: _nextMonth,
+                  icon: const Icon(Icons.chevron_right, color: AppColors.primaryBlue),
+                ),
+              ],
+            )
+          else
+            Column(
+              children: [
+                // Start Date
+                GestureDetector(
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: _startDate ?? DateTime.now(),
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime(2100),
+                    );
+                    if (picked != null) {
+                      setState(() {
+                        _startDate = picked;
+                        if (_endDate != null && _endDate!.isBefore(_startDate!)) {
+                          _endDate = null;
+                        }
+                      });
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: AppColors.gray50,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.gray200),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_today, size: 18, color: AppColors.gray600),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            _startDate != null
+                                ? DateFormat('MMM dd, yyyy').format(_startDate!)
+                                : 'Start Date',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: _startDate != null ? AppColors.gray900 : AppColors.gray400,
+                              fontWeight: _startDate != null ? FontWeight.w500 : FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                        const Icon(Icons.arrow_drop_down, color: AppColors.gray600),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                // End Date
+                GestureDetector(
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: _endDate ?? _startDate ?? DateTime.now(),
+                      firstDate: _startDate ?? DateTime(2020),
+                      lastDate: DateTime(2100),
+                    );
+                    if (picked != null) {
+                      setState(() {
+                        _endDate = picked;
+                      });
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: AppColors.gray50,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.gray200),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_today, size: 18, color: AppColors.gray600),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            _endDate != null
+                                ? DateFormat('MMM dd, yyyy').format(_endDate!)
+                                : 'End Date',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: _endDate != null ? AppColors.gray900 : AppColors.gray400,
+                              fontWeight: _endDate != null ? FontWeight.w500 : FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                        const Icon(Icons.arrow_drop_down, color: AppColors.gray600),
+                      ],
+                    ),
+                  ),
+                ),
+                // Clear button
+                if (_startDate != null || _endDate != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: TextButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _startDate = null;
+                          _endDate = null;
+                        });
+                      },
+                      icon: const Icon(Icons.clear, size: 16),
+                      label: const Text('Clear'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.gray600,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+        ],
+      ),
+    );
   }
 
   Future<void> _loadCoachProfiles() async {
@@ -299,12 +618,14 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
     return report.getAverageScore();
   }
 
-  List<Map<String, dynamic>> _calculateDMPerformance() {
+  List<Map<String, dynamic>> _calculateDMPerformance(List<CoachingReport> reports) {
     final coachStats = <String, Map<String, dynamic>>{};
 
     // For PM/MSL: include both MR and DM reports
     // For DM/FT: include only MR reports
-    final allCoachReports = allReports.where((r) => r.mrId.isNotEmpty).toList();
+    // Note: reports are already filtered by date in _getFilteredReports()
+    // So visits count will be for the selected month/date range only
+    final allCoachReports = reports.where((r) => r.mrId.isNotEmpty).toList();
 
     // First, collect all coach IDs from Single/Double visits to map them to Triple visits
     // Group by coachRole to find coach IDs for each role
@@ -524,7 +845,7 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
     }).whereType<Map<String, dynamic>>().toList();
   }
 
-  List<Map<String, dynamic>> _calculateScoreDistribution() {
+  List<Map<String, dynamic>> _calculateScoreDistribution(List<CoachingReport> reports) {
     final distribution = {
       'excellent': 0,
       'good': 0,
@@ -533,7 +854,7 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
     };
 
     // Filter: Only include reports with MRs (mrId is not empty)
-    final mrReports = allReports.where((r) => r.mrId.isNotEmpty).toList();
+    final mrReports = reports.where((r) => r.mrId.isNotEmpty).toList();
 
     for (final report in mrReports) {
       final avgScore = _calculateAvgScore(report);
@@ -579,13 +900,13 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
     ];
   }
 
-  List<Map<String, dynamic>> _calculateMonthlyTrend() {
+  List<Map<String, dynamic>> _calculateMonthlyTrend(List<CoachingReport> reports) {
     final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     final now = DateTime.now();
     final monthlyData = <Map<String, dynamic>>[];
 
     // Filter: Only include reports with MRs (mrId is not empty)
-    final mrReports = allReports.where((r) => r.mrId.isNotEmpty).toList();
+    final mrReports = reports.where((r) => r.mrId.isNotEmpty).toList();
 
     for (int i = 5; i >= 0; i--) {
       final date = DateTime(now.year, now.month - i, 1);
@@ -621,12 +942,15 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final dmPerformance = _calculateDMPerformance();
-    final scoreDistribution = _calculateScoreDistribution();
-    final monthlyTrend = _calculateMonthlyTrend();
+    // Get filtered reports based on date filter
+    final filteredReports = _getFilteredReports();
+    
+    final dmPerformance = _calculateDMPerformance(filteredReports);
+    final scoreDistribution = _calculateScoreDistribution(filteredReports);
+    final monthlyTrend = _calculateMonthlyTrend(filteredReports);
 
     // Filter: Only include reports with MRs (mrId is not empty)
-    final mrReports = allReports.where((r) => r.mrId.isNotEmpty).toList();
+    final mrReports = filteredReports.where((r) => r.mrId.isNotEmpty).toList();
     
     final totalVisits = mrReports.length;
     
@@ -712,6 +1036,9 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
                     // Sync Status Indicator
                     const SyncStatusIndicator(),
                     AppSpacing.vertical(AppSpacing.lg),
+                    // Filter by Date
+                    _buildDateSelector(),
+                    AppSpacing.vertical(AppSpacing.lg),
                   // Stats Cards
                   Row(
                     children: [
@@ -792,6 +1119,8 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
                                     child: BarChart(
                                       BarChartData(
                                         alignment: BarChartAlignment.spaceAround,
+                                        minY: 0,
+                                        maxY: 20,
                                         gridData: FlGridData(
                                           show: true,
                                           drawVerticalLine: false,
@@ -808,14 +1137,18 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
                                             sideTitles: SideTitles(
                                               showTitles: true,
                                               reservedSize: 40,
+                                              interval: 2, // Show every 2 units (0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20)
                                               getTitlesWidget: (value, meta) {
-                                                return Text(
-                                                  value.toInt().toString(),
-                                                  style: const TextStyle(
-                                                    color: AppColors.gray600,
-                                                    fontSize: 12,
-                                                  ),
-                                                );
+                                                if (value.toInt() % 2 == 0 && value.toInt() >= 0 && value.toInt() <= 20) {
+                                                  return Text(
+                                                    value.toInt().toString(),
+                                                    style: const TextStyle(
+                                                      color: AppColors.gray600,
+                                                      fontSize: 12,
+                                                    ),
+                                                  );
+                                                }
+                                                return const Text('');
                                               },
                                             ),
                                           ),

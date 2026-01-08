@@ -6,6 +6,7 @@ import 'package:biosyn_report_flutter/models/coaching_report.dart';
 import 'package:biosyn_report_flutter/utils/export_utils.dart';
 import 'package:biosyn_report_flutter/services/supabase_service.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:intl/intl.dart';
 
 class GMReportsScreen extends StatefulWidget {
   final List<CoachingReport> reports;
@@ -27,10 +28,8 @@ class GMReportsScreen extends StatefulWidget {
 
 class _GMReportsScreenState extends State<GMReportsScreen> {
   final _searchController = TextEditingController();
-  String _selectedDM = 'all';
-  String _selectedMR = 'all';
-  String _dateFilter = 'all';
-  bool _showFilters = false;
+  String? _selectedCoachId; // Changed from _selectedDM
+  String? _selectedMRId = null; // Changed to MR ID instead of name
   CoachingReport? _selectedReport;
   Map<String, String> _mrRoles = {}; // Map of MR ID to role
   Map<String, String?> _mrProfilePictures = {}; // Map of MR ID -> profile_picture_url
@@ -38,6 +37,30 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
   Set<String> _mrIds = {}; // Set of MR IDs from users table
   Set<String> _dmIds = {}; // Set of DM IDs from users table
   Map<String, String> _coachNames = {}; // Map of coach ID -> coach name
+  List<Map<String, dynamic>> _allMRs = []; // All MRs from Supabase
+  
+  // Date filtering (like Plans)
+  DateTime _selectedMonth = DateTime.now();
+  DateTime? _startDate;
+  DateTime? _endDate;
+  bool _useDateRange = false;
+  
+  // All coaches list (DM, FT, PM, MSL)
+  List<Map<String, dynamic>> _allCoaches = [];
+  
+  // Colors for different coaches
+  final List<Color> _colorPalette = [
+    AppColors.primaryBlue,
+    AppColors.primaryCyan,
+    Colors.purple,
+    Colors.orange,
+    Colors.green,
+    Colors.red,
+    Colors.teal,
+    Colors.pink,
+    Colors.indigo,
+    Colors.amber,
+  ];
 
   @override
   void initState() {
@@ -45,6 +68,70 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
     _loadMRProfiles();
     _loadMRRoles();
     _loadCoachNames();
+    _loadAllCoaches();
+  }
+  
+  Future<void> _loadAllCoaches() async {
+    try {
+      debugPrint('👤 Loading all coaches for filter...');
+      final dms = await SupabaseService.getAllDMs();
+      final fts = await SupabaseService.getAllFTs();
+      final pms = await SupabaseService.getAllPMs();
+      final msls = await SupabaseService.getAllMSLs();
+      
+      // Combine all coaches
+      final allCoaches = [
+        ...dms.map((dm) => {...dm, 'role': 'dm'}),
+        ...fts.map((ft) => {...ft, 'role': 'ft'}),
+        ...pms.map((pm) => {...pm, 'role': 'pm'}),
+        ...msls.map((msl) => {...msl, 'role': 'msl'}),
+      ];
+      
+      debugPrint('   ✅ Loaded ${allCoaches.length} Coaches (${dms.length} DMs, ${fts.length} FTs, ${pms.length} PMs, ${msls.length} MSLs)');
+      if (mounted) {
+        setState(() {
+          _allCoaches = allCoaches;
+        });
+      }
+    } catch (e) {
+      debugPrint('   ❌ Error loading all coaches: $e');
+    }
+  }
+  
+  Color _getColorForCoach(int index) {
+    return _colorPalette[index % _colorPalette.length];
+  }
+  
+  String _getRoleLabel(String? role) {
+    if (role == null || role.isEmpty) return 'DM';
+    switch (role.toLowerCase()) {
+      case 'dm':
+        return 'DM';
+      case 'ft':
+        return 'FT';
+      case 'pm':
+        return 'PM';
+      case 'msl':
+        return 'MSL';
+      case 'mr':
+        return 'MR';
+      case 'gm':
+        return 'GM';
+      default:
+        return role.toUpperCase();
+    }
+  }
+  
+  void _previousMonth() {
+    setState(() {
+      _selectedMonth = DateTime(_selectedMonth.year, _selectedMonth.month - 1, 1);
+    });
+  }
+
+  void _nextMonth() {
+    setState(() {
+      _selectedMonth = DateTime(_selectedMonth.year, _selectedMonth.month + 1, 1);
+    });
   }
 
   Future<void> _loadCoachNames() async {
@@ -164,6 +251,7 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
       final dmIdsSet = <String>{};
       
       // Load MR profiles
+      final allMRsList = <Map<String, dynamic>>[];
       for (final mr in mrs) {
         final id = (mr['id'] ?? '').toString();
         final name = (mr['name'] ?? '').toString();
@@ -172,6 +260,11 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
         if (id.isNotEmpty) {
           profileMap[id] = profileUrl;
           mrIdsSet.add(id);
+          allMRsList.add({
+            'id': id,
+            'name': name,
+            'profile_picture_url': profileUrl,
+          });
         }
         if (name.isNotEmpty && id.isNotEmpty) {
           nameToIdMap[name] = id;
@@ -197,12 +290,14 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
       
       debugPrint('   ✅ Loaded ${profileMap.length} profiles (MRs + DMs)');
       debugPrint('   📋 MR IDs: ${mrIdsSet.length}, DM IDs: ${dmIdsSet.length}');
+      debugPrint('   📋 All MRs from Supabase: ${allMRsList.length}');
       if (mounted) {
         setState(() {
           _mrProfilePictures = profileMap;
           _mrNamesToIds = nameToIdMap;
           _mrIds = mrIdsSet;
           _dmIds = dmIdsSet;
+          _allMRs = allMRsList;
         });
       }
     } catch (e) {
@@ -225,66 +320,63 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
     return null;
   }
 
-  List<String> get _uniqueDMs {
-    // Include coach name with role for PM/MSL
-    return widget.reports
-        .map((r) {
-          if (r.coachRole != null && r.coachRole!.isNotEmpty) {
-            return '${r.dmName} (${r.coachRole!.toUpperCase()})';
-          }
-          return r.dmName;
-        })
-        .where((name) => name.isNotEmpty)
-        .toSet()
-        .toList();
-  }
 
-  List<String> get _uniqueMRs {
-    return widget.reports
-        .map((r) => r.mrName)
-        .where((name) => name.isNotEmpty)
-        .toSet()
-        .toList();
+  // Get all MRs from Supabase (not just from reports)
+  List<Map<String, dynamic>> get _uniqueMRs {
+    // Return MRs from Supabase, sorted by name
+    return _allMRs.toList()
+      ..sort((a, b) => (a['name'] ?? '').toString().compareTo((b['name'] ?? '').toString()));
   }
 
   List<CoachingReport> get _filteredReports {
     return widget.reports.where((report) {
+      // Search filter
       final matchesSearch = _searchController.text.isEmpty ||
           report.mrName.toLowerCase().contains(_searchController.text.toLowerCase()) ||
           report.dmName.toLowerCase().contains(_searchController.text.toLowerCase()) ||
           report.mrId.contains(_searchController.text) ||
           (report.coachRole != null && report.coachRole!.toLowerCase().contains(_searchController.text.toLowerCase()));
 
-      // Match DM/Coach name with role
-      final reportCoachName = report.coachRole != null && report.coachRole!.isNotEmpty
-          ? '${report.dmName} (${report.coachRole!.toUpperCase()})'
-          : report.dmName;
-      final matchesDM = _selectedDM == 'all' || reportCoachName == _selectedDM;
-      final matchesMR = _selectedMR == 'all' || report.mrName == _selectedMR;
+      // Coach filter - match by coach ID
+      bool matchesCoach = true;
+      if (_selectedCoachId != null) {
+        final reportCoachId = _getCoachIdFromReport(report);
+        matchesCoach = reportCoachId == _selectedCoachId;
+      }
+      
+      // MR filter - match by MR ID
+      bool matchesMR = true;
+      if (_selectedMRId != null) {
+        matchesMR = report.mrId == _selectedMRId;
+      }
 
+      // Date filter - Month or Date Range
       bool matchesDate = true;
-      if (_dateFilter != 'all' && report.date.isNotEmpty) {
+      if (report.date.isNotEmpty) {
         try {
           final reportDate = DateTime.parse(report.date);
-          final today = DateTime.now();
+          final reportDateOnly = DateTime(reportDate.year, reportDate.month, reportDate.day);
           
-          if (_dateFilter == 'today') {
-            matchesDate = reportDate.year == today.year &&
-                reportDate.month == today.month &&
-                reportDate.day == today.day;
-          } else if (_dateFilter == 'week') {
-            final weekAgo = today.subtract(const Duration(days: 7));
-            matchesDate = reportDate.isAfter(weekAgo) || reportDate.isAtSameMomentAs(weekAgo);
-          } else if (_dateFilter == 'month') {
-            matchesDate = reportDate.month == today.month &&
-                reportDate.year == today.year;
+          if (_useDateRange && _startDate != null && _endDate != null) {
+            // Filter by date range
+            final startOnly = DateTime(_startDate!.year, _startDate!.month, _startDate!.day);
+            final endOnly = DateTime(_endDate!.year, _endDate!.month, _endDate!.day);
+            matchesDate = reportDateOnly.isAtSameMomentAs(startOnly) || 
+                         reportDateOnly.isAtSameMomentAs(endOnly) ||
+                         (reportDateOnly.isAfter(startOnly) && reportDateOnly.isBefore(endOnly));
+          } else {
+            // Filter by selected month
+            final monthStart = DateTime(_selectedMonth.year, _selectedMonth.month, 1);
+            final monthEnd = DateTime(_selectedMonth.year, _selectedMonth.month + 1, 0);
+            matchesDate = reportDateOnly.isAfter(monthStart.subtract(const Duration(days: 1))) &&
+                         reportDateOnly.isBefore(monthEnd.add(const Duration(days: 1)));
           }
         } catch (e) {
           matchesDate = false;
         }
       }
 
-      return matchesSearch && matchesDM && matchesMR && matchesDate;
+      return matchesSearch && matchesCoach && matchesMR && matchesDate;
     }).toList();
   }
 
@@ -341,24 +433,6 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
   }
 
   /// Get role label for MR/DM role
-  String _getRoleLabel(String role) {
-    switch (role.toLowerCase()) {
-      case 'mr':
-        return 'MR';
-      case 'dm':
-        return 'DM';
-      case 'ft':
-        return 'FT';
-      case 'pm':
-        return 'PM';
-      case 'msl':
-        return 'MSL';
-      case 'gm':
-        return 'GM';
-      default:
-        return role.toUpperCase();
-    }
-  }
 
   /// Load MR roles from Supabase
   Future<void> _loadMRRoles() async {
@@ -386,11 +460,368 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
 
   void _clearFilters() {
     setState(() {
-      _selectedDM = 'all';
-      _selectedMR = 'all';
-      _dateFilter = 'all';
+      _selectedCoachId = null;
+      _selectedMRId = null;
+      _selectedMonth = DateTime.now();
+      _useDateRange = false;
+      _startDate = null;
+      _endDate = null;
       _searchController.clear();
     });
+  }
+  
+  Widget _buildDateSelector() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.date_range, color: AppColors.primaryBlue, size: 20),
+              const SizedBox(width: 8),
+              const Text(
+                'Filter by Date',
+                style: TextStyle(
+                  color: AppColors.gray700,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Toggle between Month and Date Range
+          Row(
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _useDateRange = false;
+                    });
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: !_useDateRange ? AppColors.primaryBlue.withOpacity(0.1) : AppColors.gray50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: !_useDateRange ? AppColors.primaryBlue : AppColors.gray200,
+                        width: !_useDateRange ? 2 : 1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.calendar_month,
+                          size: 16,
+                          color: !_useDateRange ? AppColors.primaryBlue : AppColors.gray600,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Month',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: !_useDateRange ? FontWeight.w600 : FontWeight.normal,
+                            color: !_useDateRange ? AppColors.primaryBlue : AppColors.gray600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _useDateRange = true;
+                    });
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: _useDateRange ? AppColors.primaryBlue.withOpacity(0.1) : AppColors.gray50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: _useDateRange ? AppColors.primaryBlue : AppColors.gray200,
+                        width: _useDateRange ? 2 : 1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.date_range,
+                          size: 16,
+                          color: _useDateRange ? AppColors.primaryBlue : AppColors.gray600,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Date Range',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: _useDateRange ? FontWeight.w600 : FontWeight.normal,
+                            color: _useDateRange ? AppColors.primaryBlue : AppColors.gray600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Month selector or Date range selector
+          if (!_useDateRange)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                IconButton(
+                  onPressed: _previousMonth,
+                  icon: const Icon(Icons.chevron_left, color: AppColors.primaryBlue),
+                ),
+                Text(
+                  DateFormat('MMMM yyyy').format(_selectedMonth),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.gray700,
+                  ),
+                ),
+                IconButton(
+                  onPressed: _nextMonth,
+                  icon: const Icon(Icons.chevron_right, color: AppColors.primaryBlue),
+                ),
+              ],
+            )
+          else
+            Column(
+              children: [
+                // Start Date
+                GestureDetector(
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: _startDate ?? DateTime.now(),
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime(2100),
+                    );
+                    if (picked != null) {
+                      setState(() {
+                        _startDate = picked;
+                        if (_endDate != null && _endDate!.isBefore(_startDate!)) {
+                          _endDate = null;
+                        }
+                      });
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: AppColors.gray50,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.gray200),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_today, size: 18, color: AppColors.gray600),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            _startDate != null
+                                ? DateFormat('MMM dd, yyyy').format(_startDate!)
+                                : 'Start Date',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: _startDate != null ? AppColors.gray900 : AppColors.gray400,
+                              fontWeight: _startDate != null ? FontWeight.w500 : FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                        const Icon(Icons.arrow_drop_down, color: AppColors.gray600),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                // End Date
+                GestureDetector(
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: _endDate ?? _startDate ?? DateTime.now(),
+                      firstDate: _startDate ?? DateTime(2020),
+                      lastDate: DateTime(2100),
+                    );
+                    if (picked != null) {
+                      setState(() {
+                        _endDate = picked;
+                      });
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: AppColors.gray50,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.gray200),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_today, size: 18, color: AppColors.gray600),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            _endDate != null
+                                ? DateFormat('MMM dd, yyyy').format(_endDate!)
+                                : 'End Date',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: _endDate != null ? AppColors.gray900 : AppColors.gray400,
+                              fontWeight: _endDate != null ? FontWeight.w500 : FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                        const Icon(Icons.arrow_drop_down, color: AppColors.gray600),
+                      ],
+                    ),
+                  ),
+                ),
+                // Clear button
+                if (_startDate != null || _endDate != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: TextButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _startDate = null;
+                          _endDate = null;
+                        });
+                      },
+                      icon: const Icon(Icons.clear, size: 16),
+                      label: const Text('Clear'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.gray600,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildCoachFilter() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.filter_list, color: AppColors.primaryBlue, size: 20),
+              SizedBox(width: 8),
+              Text(
+                'Filter by Coach',
+                style: TextStyle(
+                  color: AppColors.gray700,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: _selectedCoachId,
+            isExpanded: true,
+            decoration: InputDecoration(
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: AppColors.gray200),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: AppColors.gray200),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: AppColors.primaryCyan, width: 2),
+              ),
+              filled: true,
+              fillColor: AppColors.gray50,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            ),
+            hint: const Text('All Coaches'),
+            items: [
+              const DropdownMenuItem<String>(
+                value: null,
+                child: Text('All Coaches'),
+              ),
+              ..._allCoaches.asMap().entries.map((entry) {
+                final coach = entry.value;
+                final index = entry.key;
+                return DropdownMenuItem<String>(
+                  value: coach['id']?.toString(),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: _getColorForCoach(index),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          '${coach['name']?.toString() ?? 'Unknown'} (${_getRoleLabel(coach['role']?.toString())})',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ],
+            onChanged: (value) {
+              setState(() {
+                _selectedCoachId = value;
+              });
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -448,233 +879,127 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                               ),
                             ),
                             const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: InkWell(
-                                    onTap: () {
-                                      setState(() {
-                                        _showFilters = !_showFilters;
-                                      });
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(vertical: 12),
-                                      decoration: BoxDecoration(
-                                        color: _showFilters
-                                            ? AppColors.primaryBlue
-                                            : Colors.white,
-                                        border: Border.all(
-                                          color: _showFilters
-                                              ? AppColors.primaryBlue
-                                              : AppColors.gray200,
-                                          width: 2,
-                                        ),
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Row(
-                                        mainAxisAlignment: MainAxisAlignment.center,
-                                        children: [
-                                          Icon(
-                                            Icons.filter_list,
-                                            color: _showFilters ? Colors.white : AppColors.gray700,
-                                            size: 16,
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Text(
-                                            'Filters',
-                                            style: TextStyle(
-                                              color: _showFilters
-                                                  ? Colors.white
-                                                  : AppColors.gray700,
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w500,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
+                            Container(
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [Color(0xFF10B981), Color(0xFF059669)],
                                 ),
-                                const SizedBox(width: 12),
-                                Expanded(
+                                borderRadius: BorderRadius.circular(8),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: AppColors.success.withOpacity(0.3),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Material(
+                                color: Colors.transparent,
+                                child: InkWell(
+                                  onTap: () async {
+                                    try {
+                                      final filePath = await ExportUtils.exportAllReportsToText(widget.reports);
+                                      if (mounted) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            content: Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Text('✅ All reports exported successfully!', style: TextStyle(fontWeight: FontWeight.bold)),
+                                                SizedBox(height: 4),
+                                                Text('📁 Location:', style: TextStyle(fontSize: 12)),
+                                                Text(filePath, style: TextStyle(fontSize: 11, color: Colors.white70)),
+                                              ],
+                                            ),
+                                            duration: const Duration(seconds: 6),
+                                          ),
+                                        );
+                                      }
+                                    } catch (e) {
+                                      if (mounted) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(content: Text('Export failed: ${e.toString()}')),
+                                        );
+                                      }
+                                    }
+                                  },
+                                  borderRadius: BorderRadius.circular(8),
                                   child: Container(
-                                    decoration: BoxDecoration(
-                                      gradient: const LinearGradient(
-                                        colors: [Color(0xFF10B981), Color(0xFF059669)],
-                                      ),
-                                      borderRadius: BorderRadius.circular(8),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: AppColors.success.withOpacity(0.3),
-                                          blurRadius: 10,
-                                          offset: const Offset(0, 2),
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    child: const Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(Icons.download, color: Colors.white, size: 16),
+                                        SizedBox(width: 8),
+                                        Text(
+                                          'Export All',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w500,
+                                          ),
                                         ),
                                       ],
                                     ),
-                                    child: Material(
-                                      color: Colors.transparent,
-                                      child: InkWell(
-                                        onTap: () async {
-                                      try {
-                                        await ExportUtils.exportAllReportsToText(widget.reports);
-                                        if (mounted) {
-                                          ScaffoldMessenger.of(context).showSnackBar(
-                                            const SnackBar(content: Text('Reports exported successfully!')),
-                                          );
-                                        }
-                                      } catch (e) {
-                                        if (mounted) {
-                                          ScaffoldMessenger.of(context).showSnackBar(
-                                            SnackBar(content: Text('Export failed: ${e.toString()}')),
-                                          );
-                                        }
-                                      }
-                                    },
-                                        borderRadius: BorderRadius.circular(8),
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(vertical: 12),
-                                          child: const Row(
-                                            mainAxisAlignment: MainAxisAlignment.center,
-                                            children: [
-                                              Icon(Icons.download, color: Colors.white, size: 16),
-                                              SizedBox(width: 8),
-                                              Text(
-                                                'Export All',
-                                                style: TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 14,
-                                                  fontWeight: FontWeight.w500,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
                                   ),
                                 ),
-                              ],
+                              ),
                             ),
-                            if (_showFilters) ...[
-                              const SizedBox(height: 16),
-                              const Divider(),
-                              const SizedBox(height: 16),
-                              DropdownButtonFormField<String>(
-                                value: _selectedDM,
-                                decoration: InputDecoration(
-                                  labelText: 'District Manager',
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                    borderSide: const BorderSide(color: AppColors.gray200, width: 2),
-                                  ),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                    borderSide: const BorderSide(color: AppColors.gray200, width: 2),
-                                  ),
-                                  focusedBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                    borderSide: const BorderSide(color: AppColors.primaryCyan, width: 2),
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.white,
-                                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            const SizedBox(height: 16),
+                            // Filter by Date
+                            _buildDateSelector(),
+                            const SizedBox(height: 16),
+                            // Filter by Coach
+                            _buildCoachFilter(),
+                            const SizedBox(height: 16),
+                            // Medical Rep filter - using MRs from Supabase
+                            DropdownButtonFormField<String?>(
+                              value: _selectedMRId,
+                              decoration: InputDecoration(
+                                labelText: 'Medical Rep',
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(color: AppColors.gray200, width: 2),
                                 ),
-                                items: [
-                                  const DropdownMenuItem(value: 'all', child: Text('All District Managers')),
-                                  ..._uniqueDMs.map((dm) => DropdownMenuItem(value: dm, child: Text(dm))),
-                                ],
-                                onChanged: (value) {
-                                  setState(() {
-                                    _selectedDM = value ?? 'all';
-                                  });
-                                },
-                              ),
-                              const SizedBox(height: 12),
-                              DropdownButtonFormField<String>(
-                                value: _selectedMR,
-                                decoration: InputDecoration(
-                                  labelText: 'Medical Rep',
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                    borderSide: const BorderSide(color: AppColors.gray200, width: 2),
-                                  ),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                    borderSide: const BorderSide(color: AppColors.gray200, width: 2),
-                                  ),
-                                  focusedBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                    borderSide: const BorderSide(color: AppColors.primaryCyan, width: 2),
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.white,
-                                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(color: AppColors.gray200, width: 2),
                                 ),
-                                items: [
-                                  const DropdownMenuItem(value: 'all', child: Text('All Medical Reps')),
-                                  ..._uniqueMRs.map((mr) => DropdownMenuItem(value: mr, child: Text(mr))),
-                                ],
-                                onChanged: (value) {
-                                  setState(() {
-                                    _selectedMR = value ?? 'all';
-                                  });
-                                },
-                              ),
-                              const SizedBox(height: 12),
-                              DropdownButtonFormField<String>(
-                                value: _dateFilter,
-                                decoration: InputDecoration(
-                                  labelText: 'Date Range',
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                    borderSide: const BorderSide(color: AppColors.gray200, width: 2),
-                                  ),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                    borderSide: const BorderSide(color: AppColors.gray200, width: 2),
-                                  ),
-                                  focusedBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                    borderSide: const BorderSide(color: AppColors.primaryCyan, width: 2),
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.white,
-                                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(color: AppColors.primaryCyan, width: 2),
                                 ),
-                                items: const [
-                                  DropdownMenuItem(value: 'all', child: Text('All Time')),
-                                  DropdownMenuItem(value: 'today', child: Text('Today')),
-                                  DropdownMenuItem(value: 'week', child: Text('Last 7 Days')),
-                                  DropdownMenuItem(value: 'month', child: Text('This Month')),
-                                ],
-                                onChanged: (value) {
-                                  setState(() {
-                                    _dateFilter = value ?? 'all';
-                                  });
-                                },
+                                filled: true,
+                                fillColor: Colors.white,
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                               ),
-                              const SizedBox(height: 12),
-                              InkWell(
-                                onTap: _clearFilters,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(vertical: 12),
-                                  decoration: BoxDecoration(
-                                    color: Colors.transparent,
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: const Center(
-                                    child: Text(
-                                      'Clear All Filters',
-                                      style: TextStyle(
-                                        color: AppColors.primaryBlue,
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ),
-                                ),
+                              items: [
+                                const DropdownMenuItem<String?>(value: null, child: Text('All Medical Reps')),
+                                ..._uniqueMRs.map((mr) {
+                                  final mrId = (mr['id'] ?? '').toString();
+                                  final mrName = (mr['name'] ?? '').toString();
+                                  return DropdownMenuItem<String?>(
+                                    value: mrId,
+                                    child: Text(mrName),
+                                  );
+                                }),
+                              ],
+                              onChanged: (value) {
+                                setState(() {
+                                  _selectedMRId = value;
+                                });
+                              },
+                            ),
+                            const SizedBox(height: 12),
+                            TextButton.icon(
+                              onPressed: _clearFilters,
+                              icon: const Icon(Icons.clear, size: 16),
+                              label: const Text('Clear All Filters'),
+                              style: TextButton.styleFrom(
+                                foregroundColor: AppColors.primaryBlue,
                               ),
-                            ],
+                            ),
                           ],
                         ),
                       ),
@@ -1205,10 +1530,22 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                                                 child: InkWell(
                                                   onTap: () async {
                                                     try {
-                                                      await ExportUtils.exportSingleReportToText(report);
+                                                      final filePath = await ExportUtils.exportSingleReportToText(report);
                                                       if (mounted) {
                                                         ScaffoldMessenger.of(context).showSnackBar(
-                                                          const SnackBar(content: Text('Report exported successfully!')),
+                                                          SnackBar(
+                                                            content: Column(
+                                                              mainAxisSize: MainAxisSize.min,
+                                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                                              children: [
+                                                                Text('✅ Report exported successfully!', style: TextStyle(fontWeight: FontWeight.bold)),
+                                                                SizedBox(height: 4),
+                                                                Text('📁 Location:', style: TextStyle(fontSize: 12)),
+                                                                Text(filePath, style: TextStyle(fontSize: 11, color: Colors.white70)),
+                                                              ],
+                                                            ),
+                                                            duration: const Duration(seconds: 6),
+                                                          ),
                                                         );
                                                       }
                                                     } catch (e) {
@@ -1585,7 +1922,7 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                             if (report.brickName != null)
                               _buildModalInfoItem('Brick Name', report.brickName!),
                             if (report.visitCount != null)
-                              _buildModalInfoItem('Visit Count', report.visitCount.toString()),
+                              _buildModalInfoItem('Visits Count', report.visitCount.toString()),
                             if (report.doctorsVisited != null && report.doctorsVisited!.isNotEmpty)
                               _buildModalInfoItem('Doctors Visited', report.doctorsVisited!),
                           ],
@@ -1843,10 +2180,22 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                           child: InkWell(
                             onTap: () async {
                               try {
-                                await ExportUtils.exportSingleReportToText(report);
+                                final filePath = await ExportUtils.exportSingleReportToText(report);
                                 if (mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Report exported successfully!')),
+                                    SnackBar(
+                                      content: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text('✅ Report exported successfully!', style: TextStyle(fontWeight: FontWeight.bold)),
+                                          SizedBox(height: 4),
+                                          Text('📁 Location:', style: TextStyle(fontSize: 12)),
+                                          Text(filePath, style: TextStyle(fontSize: 11, color: Colors.white70)),
+                                        ],
+                                      ),
+                                      duration: const Duration(seconds: 6),
+                                    ),
                                   );
                                 }
                               } catch (e) {

@@ -10,6 +10,7 @@ import 'package:biosyn_report_flutter/models/coaching_report.dart';
 import 'package:biosyn_report_flutter/utils/export_utils.dart';
 import 'package:biosyn_report_flutter/services/supabase_service.dart';
 import 'package:biosyn_report_flutter/utils/responsive.dart';
+import 'package:biosyn_report_flutter/screens/shared/notifications_screen.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
@@ -42,6 +43,8 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
   List<CoachingReport> _currentReports = [];
   Map<String, String?> _mrProfilePictures = {}; // Map of MR ID -> profile_picture_url
   Map<String, String?> _mrNamesToIds = {}; // Map of MR name -> MR ID for lookup
+  int _unreadNotificationsCount = 0;
+  Timer? _notificationsTimer;
 
   @override
   void initState() {
@@ -49,6 +52,45 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
     _currentReports = List.from(widget.reports);
     _loadMRProfiles();
     _startRealtimeUpdates();
+    if (widget.dmId != null) {
+      _loadUnreadNotificationsCount();
+      // Refresh notifications count every 30 seconds
+      _notificationsTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+        _loadUnreadNotificationsCount();
+      });
+    }
+  }
+
+  Future<void> _loadUnreadNotificationsCount() async {
+    if (widget.dmId == null) return;
+    
+    try {
+      final count = await SupabaseService.getUnreadNotificationsCount(widget.dmId!);
+      if (mounted) {
+        setState(() {
+          _unreadNotificationsCount = count;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading unread notifications count: $e');
+    }
+  }
+
+  void _openNotifications() {
+    if (widget.dmId == null) return;
+    
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => NotificationsScreen(
+          userId: widget.dmId!,
+          activeTab: widget.activeTab,
+          onTabChange: widget.onTabChange,
+        ),
+      ),
+    ).then((_) {
+      // Refresh count when returning from notifications screen
+      _loadUnreadNotificationsCount();
+    });
   }
 
   Future<void> _loadMRProfiles() async {
@@ -289,6 +331,7 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
 
   @override
   void dispose() {
+    _notificationsTimer?.cancel();
     _reportsSubscription?.cancel();
     super.dispose();
   }
@@ -368,10 +411,49 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
           children: [
             Column(
               children: [
-            // Header
-            const AppHeader(
+            // Header with notifications bell
+            AppHeader(
               title: 'Dashboard',
               subtitle: 'Your coaching performance overview',
+              trailing: widget.dmId != null
+                  ? Stack(
+                      children: [
+                        IconButton(
+                          icon: const Icon(
+                            Icons.notifications_outlined,
+                            color: Colors.white,
+                            size: 28,
+                          ),
+                          onPressed: _openNotifications,
+                        ),
+                        if (_unreadNotificationsCount > 0)
+                          Positioned(
+                            right: 8,
+                            top: 8,
+                            child: Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: const BoxDecoration(
+                                color: Colors.red,
+                                shape: BoxShape.circle,
+                              ),
+                              constraints: const BoxConstraints(
+                                minWidth: 16,
+                                minHeight: 16,
+                              ),
+                              child: Text(
+                                _unreadNotificationsCount > 9 ? '9+' : '$_unreadNotificationsCount',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ),
+                      ],
+                    )
+                  : null,
             ),
             // Content
             Expanded(
@@ -1858,7 +1940,7 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                             if (report.brickName != null && report.brickName!.isNotEmpty)
                               _buildModalInfoItem('Brick Name', report.brickName!),
                             if (report.visitCount != null && report.visitCount! > 0)
-                              _buildModalInfoItem('Visit Count', report.visitCount.toString()),
+                              _buildModalInfoItem('Visits Count', report.visitCount.toString()),
                             if (report.doctorsVisited != null && report.doctorsVisited!.isNotEmpty)
                               _buildModalInfoItem('Doctors Visited', report.doctorsVisited!),
                             if (report.isQuickSession == true)
@@ -2106,10 +2188,22 @@ class _DMDashboardScreenState extends State<DMDashboardScreen> {
                             child: InkWell(
                               onTap: () async {
                                 try {
-                                  await ExportUtils.exportSingleReportToText(report);
+                                  final filePath = await ExportUtils.exportSingleReportToText(report);
                                   if (mounted) {
                                     ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text('Report exported successfully!')),
+                                      SnackBar(
+                                        content: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text('✅ Report exported successfully!', style: TextStyle(fontWeight: FontWeight.bold)),
+                                            SizedBox(height: 4),
+                                            Text('📁 Location:', style: TextStyle(fontSize: 12)),
+                                            Text(filePath, style: TextStyle(fontSize: 11, color: Colors.white70)),
+                                          ],
+                                        ),
+                                        duration: const Duration(seconds: 6),
+                                      ),
                                     );
                                   }
                                 } catch (e) {

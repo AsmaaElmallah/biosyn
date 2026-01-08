@@ -916,7 +916,7 @@ class _PMMSLCoachingFormScreenState extends State<PMMSLCoachingFormScreen> {
           keyboardType: TextInputType.number,
           onChanged: (value) => _updateField('visitCount', value),
           decoration: InputDecoration(
-            labelText: 'Visit Count',
+            labelText: 'Visits Count',
             hintText: '1',
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),

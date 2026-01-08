@@ -1770,7 +1770,9 @@ class SupabaseService {
     }
   }
 
-  /// Send notification to all users (GM + all coaches) about time/date change
+  /// Send notification to GM and sender about time/date change
+  /// GM: receives notification for monitoring
+  /// Sender: receives notification for their own notifications screen
   static Future<void> sendTimeChangeNotification({
     required String senderId,
     required String senderName,
@@ -1784,24 +1786,54 @@ class SupabaseService {
         return;
       }
 
-      // Get all users (GM + all coaches)
+      // Get only GMs (for GM dashboard)
       final gms = await getAllGMs();
-      final dms = await getAllDMs();
-      final fts = await getAllFTs();
-      final pms = await getAllPMs();
-      final msls = await getAllMSLs();
       
-      // Combine all users
-      final allUsers = <Map<String, dynamic>>[];
-      allUsers.addAll(gms);
-      allUsers.addAll(dms);
-      allUsers.addAll(fts);
-      allUsers.addAll(pms);
-      allUsers.addAll(msls);
+      // Get sender user info (for their own notifications screen)
+      Map<String, dynamic>? senderUser;
+      try {
+        final senderUuid = senderId;
+        final users = await client!
+            .from('users')
+            .select('id, name, role')
+            .or('id.eq.$senderUuid,username.eq.$senderId')
+            .limit(1);
+        if (users.isNotEmpty) {
+          senderUser = users[0];
+        }
+      } catch (e) {
+        debugPrint('⚠️ Could not find sender user: $e');
+      }
       
-      if (allUsers.isEmpty) {
-        debugPrint('⚠️ No users found, cannot send notification');
+      // Combine: GMs + sender (if found and not already a GM)
+      final recipients = <Map<String, dynamic>>[];
+      recipients.addAll(gms);
+      if (senderUser != null) {
+        final senderUserId = senderUser['id']?.toString() ?? '';
+        final senderUserRole = senderUser['role']?.toString() ?? '';
+        final isSenderGM = senderUserRole.toLowerCase() == 'gm';
+        
+        // Only add if sender is not a GM (to avoid duplicate)
+        if (!isSenderGM && senderUserId.isNotEmpty) {
+          // Check if sender is already in the list
+          final alreadyAdded = recipients.any((user) => 
+            (user['id']?.toString() ?? '') == senderUserId
+          );
+          if (!alreadyAdded) {
+            recipients.add(senderUser);
+          }
+        }
+      }
+      
+      if (recipients.isEmpty) {
+        debugPrint('⚠️ No recipients found, cannot send time change notification');
         return;
+      }
+      
+      debugPrint('📬 Sending time change notifications to:');
+      debugPrint('   - ${gms.length} GM(s)');
+      if (senderUser != null && (senderUser['role']?.toString() ?? '').toLowerCase() != 'gm') {
+        debugPrint('   - 1 sender user (${senderUser['role']})');
       }
 
       // Get role label
@@ -1848,8 +1880,8 @@ class SupabaseService {
         senderUuid = senderId; // Fallback to original value
       }
 
-      // Create notifications for all users (in-app notifications)
-      final notifications = allUsers.map((user) {
+      // Create notifications for recipients (GMs + sender)
+      final notifications = recipients.map((user) {
         final userId = user['id']?.toString();
         return {
           'recipient_id': userId,
@@ -1867,7 +1899,7 @@ class SupabaseService {
       // Insert notifications to database (in-app notifications)
       await client!.from('notifications').insert(notifications);
       
-      debugPrint('✅ Sent ${notifications.length} time change notification(s) to all users');
+      debugPrint('✅ Sent ${notifications.length} time change notification(s) to GMs and sender');
       
       // Send push notifications to all users (external notifications with sound - full message)
       await _sendPushNotifications(
@@ -1881,9 +1913,9 @@ class SupabaseService {
     }
   }
 
-  /// Send notification to all users (GM + all coaches) about report submission
-  /// For GM: includes location in in-app notification
-  /// For all users: external notification without location
+  /// Send notification to GM and sender about report submission
+  /// GM: receives notification with location (for monitoring)
+  /// Sender: receives notification without location (for their own notifications screen)
   static Future<void> sendLocationNotification({
     required String senderId,
     required String senderName,
@@ -1901,24 +1933,53 @@ class SupabaseService {
         return;
       }
 
-      // Get all users (GM + all coaches)
+      // Get only GMs (for GM dashboard notifications)
       final gms = await getAllGMs();
-      final dms = await getAllDMs();
-      final fts = await getAllFTs();
-      final pms = await getAllPMs();
-      final msls = await getAllMSLs();
       
-      // Combine all users
-      final allUsers = <Map<String, dynamic>>[];
-      allUsers.addAll(gms);
-      allUsers.addAll(dms);
-      allUsers.addAll(fts);
-      allUsers.addAll(pms);
-      allUsers.addAll(msls);
+      // Get sender user info (to send notification to sender themselves)
+      Map<String, dynamic>? senderUser;
+      try {
+        final senderUsers = await client!
+            .from('users')
+            .select('id, role')
+            .or('id.eq.$senderId,username.eq.$senderId')
+            .limit(1);
+        if (senderUsers.isNotEmpty) {
+          senderUser = senderUsers[0];
+        }
+      } catch (e) {
+        debugPrint('⚠️ Could not find sender user: $e');
+      }
       
-      if (allUsers.isEmpty) {
-        debugPrint('⚠️ No users found, cannot send location notification');
+      // Combine: GMs + sender (if found and not already a GM)
+      final recipients = <Map<String, dynamic>>[];
+      recipients.addAll(gms);
+      if (senderUser != null) {
+        final senderUserId = senderUser['id']?.toString() ?? '';
+        final senderUserRole = senderUser['role']?.toString() ?? '';
+        final isSenderGM = senderUserRole.toLowerCase() == 'gm';
+        
+        // Only add if sender is not a GM (to avoid duplicate)
+        if (!isSenderGM && senderUserId.isNotEmpty) {
+          // Check if sender is already in the list
+          final alreadyAdded = recipients.any((user) => 
+            (user['id']?.toString() ?? '') == senderUserId
+          );
+          if (!alreadyAdded) {
+            recipients.add(senderUser);
+          }
+        }
+      }
+      
+      if (recipients.isEmpty) {
+        debugPrint('⚠️ No recipients found, cannot send location notification');
         return;
+      }
+      
+      debugPrint('📬 Sending report submission notifications to:');
+      debugPrint('   - ${gms.length} GM(s)');
+      if (senderUser != null && (senderUser['role']?.toString() ?? '').toLowerCase() != 'gm') {
+        debugPrint('   - 1 sender user (${senderUser['role']})');
       }
 
       // Get role label
@@ -1967,16 +2028,15 @@ class SupabaseService {
       // Create full message for external notification (without location)
       final fullMessageWithoutLocation = '$senderName ($roleLabel) submitted a coaching report on $reportDate';
 
-      // Create notifications for all users
+      // Create notifications for recipients (GMs + sender)
       // For GM: include location in in-app notification
-      // For others: message without location
-      final notifications = allUsers.map((user) {
+      // For sender: message without location (for their own notifications screen)
+      final notifications = recipients.map((user) {
         final userId = user['id']?.toString() ?? '';
         final userRole = user['role']?.toString() ?? '';
         final isGM = userRole.toLowerCase() == 'gm';
-        
         // For GM: include location in message
-        // For others: message without location
+        // For sender: message without location (they submitted it themselves)
         final message = isGM 
             ? '$senderName ($roleLabel) submitted a coaching report on $reportDate.\n$locationMsg'
             : fullMessageWithoutLocation;
@@ -1997,7 +2057,7 @@ class SupabaseService {
       // Insert notifications to database (in-app notifications)
       await client!.from('notifications').insert(notifications);
       
-      debugPrint('✅ Sent ${notifications.length} report submission notification(s) to all users');
+      debugPrint('✅ Sent ${notifications.length} report submission notification(s) to GMs and sender');
       
       // Send push notifications to all users (external notifications with sound - full message without location)
       await _sendPushNotifications(
@@ -2054,122 +2114,120 @@ class SupabaseService {
 
   // ==================== Notifications ====================
 
-  /// Get notifications for a GM
-  static Future<List<Map<String, dynamic>>> getNotifications(String gmId) async {
+  /// Get notifications for a user (any role: DM, FT, PM, MSL)
+  /// For GM, use getAllNotifications() instead
+  static Future<List<Map<String, dynamic>>> getNotifications(String userId) async {
     try {
       if (!isInitialized) {
         debugPrint('⚠️ Supabase not initialized, cannot get notifications');
         return [];
       }
       
-      debugPrint('🔍 Getting notifications for GM ID: $gmId');
+      debugPrint('🔍 Getting notifications for user ID: $userId');
       
-      // Convert gmId to UUID if needed
-      String? gmUuid = gmId;
-      if (!gmId.contains('-') || gmId.length != 36) {
-        debugPrint('   GM ID is not UUID format, trying to find UUID...');
+      // Convert userId to UUID if needed
+      String? userUuid = userId;
+      if (!userId.contains('-') || userId.length != 36) {
+        debugPrint('   User ID is not UUID format, trying to find UUID...');
         // Try to find user by username or id
         try {
           final users = await client!
               .from('users')
-              .select('id')
-              .or('id.eq.$gmId,username.eq.$gmId')
+              .select('id, role')
+              .or('id.eq.$userId,username.eq.$userId')
               .limit(1);
           if (users.isNotEmpty) {
-            gmUuid = users[0]['id']?.toString();
-            debugPrint('   ✅ Found GM UUID: $gmUuid');
+            userUuid = users[0]['id']?.toString();
+            final userRole = users[0]['role']?.toString() ?? '';
+            debugPrint('   ✅ Found user UUID: $userUuid, Role: $userRole');
+            
+            // If user is GM, they should use getAllNotifications() instead
+            if (userRole.toLowerCase() == 'gm') {
+              debugPrint('   ⚠️ User is GM, should use getAllNotifications() instead');
+              // Still return filtered results for GM (their own notifications)
+            }
           } else {
-            debugPrint('   ⚠️ No user found with ID/username: $gmId');
+            debugPrint('   ⚠️ No user found with ID/username: $userId');
           }
         } catch (e) {
-          debugPrint('   ❌ Error finding GM UUID: $e');
+          debugPrint('   ❌ Error finding user UUID: $e');
         }
       } else {
-        debugPrint('   ✅ GM ID is already UUID format');
+        debugPrint('   ✅ User ID is already UUID format');
       }
       
-      final searchId = gmUuid ?? gmId;
+      final searchId = userUuid ?? userId;
       debugPrint('   🔍 Searching notifications with recipient_id: $searchId');
       
       // Select all fields including title, message, sender_name, sender_role, etc.
+      // CRITICAL: Always filter by recipient_id to ensure users only see their own notifications
       final response = await client!
           .from('notifications')
           .select('id, recipient_id, sender_id, sender_name, sender_role, notification_type, title, message, report_id, read, created_at, updated_at')
           .eq('recipient_id', searchId)
           .order('created_at', ascending: false);
       
-      final notifications = (response as List).map((n) => n as Map<String, dynamic>).toList();
+      final allNotifications = (response as List).map((n) => n as Map<String, dynamic>).toList();
       
-      debugPrint('📬 Found ${notifications.length} notifications');
+      // CRITICAL: Double-check filter to ensure only notifications for this specific user are returned
+      // This is a client-side filter to ensure RLS policy is working correctly
+      final notifications = allNotifications.where((notification) {
+        final notificationRecipientId = notification['recipient_id']?.toString() ?? '';
+        final matches = notificationRecipientId == searchId;
+        if (!matches) {
+          debugPrint('   ⚠️ Filtered out notification: recipient_id=$notificationRecipientId, expected=$searchId');
+        }
+        return matches;
+      }).toList();
+      
+      debugPrint('📬 Found ${allNotifications.length} notifications from database, ${notifications.length} after filtering for user ID: $searchId');
       
       // Debug: Print all notifications to verify data
       if (notifications.isNotEmpty) {
-        for (var i = 0; i < notifications.length; i++) {
-          final notif = notifications[i];
-          debugPrint('   Notification $i:');
-          debugPrint('      ID: ${notif['id']}');
-          debugPrint('      Title: ${notif['title']}');
-          debugPrint('      Message: ${notif['message']}');
-          debugPrint('      Sender: ${notif['sender_name']} (${notif['sender_role']})');
-          debugPrint('      Recipient ID: ${notif['recipient_id']}');
-          debugPrint('      Read: ${notif['read']}');
-        }
+        debugPrint('   📋 First notification details:');
+        final first = notifications.first;
+        debugPrint('      ID: ${first['id']}');
+        debugPrint('      Title: ${first['title']}');
+        debugPrint('      Message: ${first['message']}');
+        debugPrint('      Sender: ${first['sender_name']} (${first['sender_role']})');
+        debugPrint('      Recipient ID: ${first['recipient_id']}');
+        debugPrint('      Read: ${first['read']}');
       } else {
-        debugPrint('   ⚠️ No notifications found with recipient_id: $searchId');
-        debugPrint('   🔍 Trying to find GM by role and get all GM notifications...');
-        
-        // Fallback: Try to get all GM notifications if specific GM not found
-        try {
-          // Get all GMs to find matching one
-          final gms = await getAllGMs();
-          debugPrint('   Found ${gms.length} GMs in database');
-          
-          // Try to find GM that matches the provided ID
-          Map<String, dynamic>? matchingGM;
-          for (var gm in gms) {
-            final gmIdStr = gm['id']?.toString();
-            final gmUsername = gm['username']?.toString();
-            if (gmIdStr == gmId || gmIdStr == searchId || gmUsername == gmId) {
-              matchingGM = gm;
-              debugPrint('   ✅ Found matching GM: ${gm['name']} (ID: $gmIdStr)');
-              break;
-            }
-          }
-          
-          if (matchingGM != null) {
-            final correctGmId = matchingGM['id']?.toString();
-            if (correctGmId != null) {
-              debugPrint('   🔍 Retrying with correct GM ID: $correctGmId');
-              
-              final retryResponse = await client!
-                  .from('notifications')
-                  .select('id, recipient_id, sender_id, sender_name, sender_role, notification_type, title, message, report_id, read, created_at, updated_at')
-                  .eq('recipient_id', correctGmId)
-                  .order('created_at', ascending: false);
-              
-              final retryNotifications = (retryResponse as List).map((n) => n as Map<String, dynamic>).toList();
-              debugPrint('   📬 Found ${retryNotifications.length} notifications with correct ID');
-              return retryNotifications;
-            }
-          }
-          
-          // Final fallback: try to return all notifications visible to this GM
-          debugPrint('   ⚠️ Falling back to all notifications visible to current user');
-          final allNotificationsResponse = await client!
-              .from('notifications')
-              .select('id, recipient_id, sender_id, sender_name, sender_role, notification_type, title, message, report_id, read, created_at, updated_at')
-              .order('created_at', ascending: false);
-          final allNotifications = (allNotificationsResponse as List).map((n) => n as Map<String, dynamic>).toList();
-          debugPrint('   📬 Fallback returned ${allNotifications.length} notifications');
-          return allNotifications;
-        } catch (e) {
-          debugPrint('   ❌ Error in fallback: $e');
-        }
+        debugPrint('   ℹ️ No notifications found for user ID: $searchId');
       }
       
       return notifications;
     } catch (e) {
       debugPrint('❌ Error getting notifications: $e');
+      debugPrint('   Stack trace: ${StackTrace.current}');
+      return [];
+    }
+  }
+
+  /// Get all notifications for GM (no filtering by recipient_id)
+  /// This allows GM to see all notifications from all users
+  static Future<List<Map<String, dynamic>>> getAllNotifications() async {
+    try {
+      if (!isInitialized) {
+        debugPrint('⚠️ Supabase not initialized, cannot get all notifications');
+        return [];
+      }
+      
+      debugPrint('🔍 Getting ALL notifications for GM');
+      
+      // Select all notifications (RLS policy allows GM to see all)
+      final response = await client!
+          .from('notifications')
+          .select('id, recipient_id, sender_id, sender_name, sender_role, notification_type, title, message, report_id, read, created_at, updated_at')
+          .order('created_at', ascending: false);
+      
+      final notifications = (response as List).map((n) => n as Map<String, dynamic>).toList();
+      
+      debugPrint('📬 Found ${notifications.length} total notifications for GM');
+      
+      return notifications;
+    } catch (e) {
+      debugPrint('❌ Error getting all notifications: $e');
       debugPrint('   Stack trace: ${StackTrace.current}');
       return [];
     }
@@ -2194,73 +2252,73 @@ class SupabaseService {
     }
   }
 
-  /// Mark all notifications as read for a GM
-  static Future<void> markAllNotificationsAsRead(String gmId) async {
+  /// Mark all notifications as read for a user (any role)
+  static Future<void> markAllNotificationsAsRead(String userId) async {
     try {
       if (!isInitialized) {
         throw Exception('Supabase not initialized');
       }
       
-      // Convert gmId to UUID if needed
-      String? gmUuid = gmId;
-      if (!gmId.contains('-') || gmId.length != 36) {
+      // Convert userId to UUID if needed
+      String? userUuid = userId;
+      if (!userId.contains('-') || userId.length != 36) {
         // Try to find user by username or id
         try {
           final users = await client!
               .from('users')
               .select('id')
-              .or('id.eq.$gmId,username.eq.$gmId')
+              .or('id.eq.$userId,username.eq.$userId')
               .limit(1);
           if (users.isNotEmpty) {
-            gmUuid = users[0]['id']?.toString();
+            userUuid = users[0]['id']?.toString();
           }
         } catch (e) {
-          debugPrint('⚠️ Could not find GM UUID: $e');
+          debugPrint('⚠️ Could not find user UUID: $e');
         }
       }
       
       await client!
           .from('notifications')
           .update({'read': true})
-          .eq('recipient_id', gmUuid ?? gmId)
+          .eq('recipient_id', userUuid ?? userId)
           .eq('read', false);
       
-      debugPrint('✅ All notifications marked as read for GM: $gmId');
+      debugPrint('✅ All notifications marked as read for user: $userId');
     } catch (e) {
       debugPrint('❌ Error marking all notifications as read: $e');
       rethrow;
     }
   }
 
-  /// Get unread notifications count for a GM
-  static Future<int> getUnreadNotificationsCount(String gmId) async {
+  /// Get unread notifications count for a user (any role)
+  static Future<int> getUnreadNotificationsCount(String userId) async {
     try {
       if (!isInitialized) {
         return 0;
       }
       
-      // Convert gmId to UUID if needed
-      String? gmUuid = gmId;
-      if (!gmId.contains('-') || gmId.length != 36) {
+      // Convert userId to UUID if needed
+      String? userUuid = userId;
+      if (!userId.contains('-') || userId.length != 36) {
         // Try to find user by username or id
         try {
           final users = await client!
               .from('users')
               .select('id')
-              .or('id.eq.$gmId,username.eq.$gmId')
+              .or('id.eq.$userId,username.eq.$userId')
               .limit(1);
           if (users.isNotEmpty) {
-            gmUuid = users[0]['id']?.toString();
+            userUuid = users[0]['id']?.toString();
           }
         } catch (e) {
-          debugPrint('⚠️ Could not find GM UUID: $e');
+          debugPrint('⚠️ Could not find user UUID: $e');
         }
       }
       
       final response = await client!
           .from('notifications')
           .select('id')
-          .eq('recipient_id', gmUuid ?? gmId)
+          .eq('recipient_id', userUuid ?? userId)
           .eq('read', false);
       
       // Get count from response

@@ -594,22 +594,26 @@ class _AppNavigatorState extends State<AppNavigator> {
           },
           onExport: (reportId) async {
             try {
+              String filePath;
               if (reportId != null && _reports.isNotEmpty) {
                 // Export single report
                 final report = _reports.firstWhere(
                   (r) => (r.mrId + r.date) == reportId,
                   orElse: () => _reports.first,
                 );
-                await ExportUtils.exportSingleReportToText(report);
+                filePath = await ExportUtils.exportSingleReportToText(report);
               } else if (_reports.isNotEmpty) {
                 // Export monthly report
-                await ExportUtils.exportMonthlyReport(_reports, _userName);
+                filePath = await ExportUtils.exportMonthlyReport(_reports, _userName);
               } else {
                 throw Exception('No reports to export');
               }
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Report exported successfully!')),
+                  SnackBar(
+                    content: Text('Report exported successfully!\nSaved to: ${filePath.split('/').last}'),
+                    duration: const Duration(seconds: 4),
+                  ),
                 );
               }
             } catch (e) {
@@ -629,10 +633,13 @@ class _AppNavigatorState extends State<AppNavigator> {
           gmId: _userId,
           onExport: () async {
             try {
-              await ExportUtils.exportAllReportsToText(_reports);
+              final filePath = await ExportUtils.exportAllReportsToText(_reports);
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Reports exported successfully!')),
+                  SnackBar(
+                    content: Text('Reports exported successfully!\nSaved to: ${filePath.split('/').last}'),
+                    duration: const Duration(seconds: 4),
+                  ),
                 );
               }
             } catch (e) {
@@ -662,17 +669,28 @@ class _AppNavigatorState extends State<AppNavigator> {
                   (r) => (r.mrId + r.date) == reportId,
                   orElse: () => _reports.first,
                 );
-                await ExportUtils.exportSingleReportToText(report);
+                final filePath = await ExportUtils.exportSingleReportToText(report);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Report exported successfully!\nSaved to: ${filePath.split('/').last}'),
+                      duration: const Duration(seconds: 4),
+                    ),
+                  );
+                }
               } else if (_reports.isNotEmpty) {
                 // Export all reports
-                await ExportUtils.exportAllReportsToText(_reports);
+                final filePath = await ExportUtils.exportAllReportsToText(_reports);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Reports exported successfully!\nSaved to: ${filePath.split('/').last}'),
+                      duration: const Duration(seconds: 4),
+                    ),
+                  );
+                }
               } else {
                 throw Exception('No reports to export');
-              }
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Report exported successfully!')),
-                );
               }
             } catch (e) {
               if (mounted) {
@@ -729,16 +747,27 @@ class _AppNavigatorState extends State<AppNavigator> {
                   (r) => (r.mrId + r.date) == reportId,
                   orElse: () => pmReports.first,
                 );
-                await ExportUtils.exportSingleReportToText(report);
+                final filePath = await ExportUtils.exportSingleReportToText(report);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Report exported successfully!\nSaved to: ${filePath.split('/').last}'),
+                      duration: const Duration(seconds: 4),
+                    ),
+                  );
+                }
               } else if (pmReports.isNotEmpty) {
-                await ExportUtils.exportAllReportsToText(pmReports);
+                final filePath = await ExportUtils.exportAllReportsToText(pmReports);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Reports exported successfully!\nSaved to: ${filePath.split('/').last}'),
+                      duration: const Duration(seconds: 4),
+                    ),
+                  );
+                }
               } else {
                 throw Exception('No reports to export');
-              }
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Report exported successfully!')),
-                );
               }
             } catch (e) {
               if (mounted) {
