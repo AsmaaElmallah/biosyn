@@ -39,6 +39,29 @@ void main() async {
         anonKey: SupabaseConfig.supabaseAnonKey,
       );
       debugPrint('✅ Supabase initialized successfully');
+      
+      // Clear any expired sessions to prevent JWT expired errors
+      try {
+        final client = Supabase.instance.client;
+        final session = client.auth.currentSession;
+        if (session != null) {
+          // Check if session is expired
+          final expiresAt = session.expiresAt;
+          if (expiresAt != null && expiresAt < DateTime.now().millisecondsSinceEpoch ~/ 1000) {
+            debugPrint('   ⚠️ Expired session detected - clearing...');
+            await client.auth.signOut();
+            debugPrint('   ✅ Expired session cleared');
+          }
+        }
+      } catch (e) {
+        debugPrint('   ⚠️ Error checking session: $e');
+        // Try to clear session anyway
+        try {
+          await Supabase.instance.client.auth.signOut();
+        } catch (_) {
+          // Ignore
+        }
+      }
     } catch (e, stackTrace) {
       // Supabase not configured or connection failed - continue with local only
       debugPrint('❌ Supabase initialization failed: $e');
@@ -596,15 +619,15 @@ class _AppNavigatorState extends State<AppNavigator> {
             try {
               String filePath;
               if (reportId != null && _reports.isNotEmpty) {
-                // Export single report
+                // Export single report - DM should not see Location
                 final report = _reports.firstWhere(
                   (r) => (r.mrId + r.date) == reportId,
                   orElse: () => _reports.first,
                 );
-                filePath = await ExportUtils.exportSingleReportToText(report);
+                filePath = await ExportUtils.exportSingleReportToText(report, showLocation: false);
               } else if (_reports.isNotEmpty) {
-                // Export monthly report
-                filePath = await ExportUtils.exportMonthlyReport(_reports, _userName);
+                // Export monthly report - DM should not see Location
+                filePath = await ExportUtils.exportMonthlyReport(_reports, _userName, showLocation: false);
               } else {
                 throw Exception('No reports to export');
               }
@@ -633,7 +656,8 @@ class _AppNavigatorState extends State<AppNavigator> {
           gmId: _userId,
           onExport: () async {
             try {
-              final filePath = await ExportUtils.exportAllReportsToText(_reports);
+              // GM should see Location
+              final filePath = await ExportUtils.exportAllReportsToText(_reports, showLocation: true);
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
@@ -747,7 +771,8 @@ class _AppNavigatorState extends State<AppNavigator> {
                   (r) => (r.mrId + r.date) == reportId,
                   orElse: () => pmReports.first,
                 );
-                final filePath = await ExportUtils.exportSingleReportToText(report);
+                // PM/MSL should not see Location
+                final filePath = await ExportUtils.exportSingleReportToText(report, showLocation: false);
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
@@ -757,7 +782,8 @@ class _AppNavigatorState extends State<AppNavigator> {
                   );
                 }
               } else if (pmReports.isNotEmpty) {
-                final filePath = await ExportUtils.exportAllReportsToText(pmReports);
+                // PM/MSL should not see Location
+                final filePath = await ExportUtils.exportAllReportsToText(pmReports, showLocation: false);
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(

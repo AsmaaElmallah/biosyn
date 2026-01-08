@@ -120,8 +120,9 @@ class SupabaseService {
         'mr_id': report.mrId,
         'mr_name': report.mrName,
         'coach_role': report.coachRole,
-        // Note: coach_id and coach_name columns don't exist in database
-        // For Triple Visit, we identify the coach by coach_role and filter client-side
+        // Add coach_id and coach_name for Triple Visit to identify the actual coach (PM/MSL)
+        'coach_id': report.coachId,
+        'coach_name': report.coachName,
         // Brick Information
         'brick_name': report.brickName,
         'brick_location_lat': report.brickLocationLat,
@@ -906,10 +907,13 @@ class SupabaseService {
       
       // Option 1: Use Supabase Auth (if using email-based auth)
       // For now, we'll use custom authentication with users table
+      debugPrint('   🔍 Searching for user in database...');
       final user = await getUserByUsername(username);
       
       if (user == null) {
         debugPrint('   ❌ User not found: $username');
+        debugPrint('   💡 Make sure the username exists in the users table');
+        debugPrint('   💡 Check your internet connection');
         throw Exception('اسم المستخدم أو كلمة المرور غير صحيحة');
       }
       
@@ -923,12 +927,21 @@ class SupabaseService {
       debugPrint('      DB password: ${dbPassword.isNotEmpty ? "${dbPassword.substring(0, dbPassword.length > 3 ? 3 : dbPassword.length)}..." : "null/empty"}');
       debugPrint('      DB password_hash: ${dbPasswordHash.isNotEmpty ? "${dbPasswordHash.substring(0, dbPasswordHash.length > 3 ? 3 : dbPasswordHash.length)}..." : "null/empty"}');
 
+      // Check if password fields are empty
+      if (dbPassword.isEmpty && dbPasswordHash.isEmpty) {
+        debugPrint('   ⚠️ WARNING: No password set for user: $username');
+        debugPrint('   💡 Please set a password for this user in the database');
+        throw Exception('كلمة المرور غير محددة للمستخدم. يرجى الاتصال بالمسؤول.');
+      }
+
       // In production, use password hashing (bcrypt)
       // For now, simple comparison (NOT SECURE - for development only)
-      if (dbPassword != password && dbPasswordHash != password) {
+      final passwordMatches = dbPassword == password || dbPasswordHash == password;
+      if (!passwordMatches) {
         debugPrint('   ❌ Invalid password for user: $username');
         debugPrint('      Expected: ${dbPassword.isNotEmpty ? dbPassword : (dbPasswordHash.isNotEmpty ? dbPasswordHash : "NO PASSWORD SET")}');
         debugPrint('      Got: $password');
+        debugPrint('   💡 Make sure you are using the correct password');
         throw Exception('اسم المستخدم أو كلمة المرور غير صحيحة');
       }
       
@@ -999,7 +1012,19 @@ class SupabaseService {
       };
     } catch (e) {
       debugPrint('   ❌ Login failed: $e');
-      throw Exception('Login failed: ${e.toString()}');
+      
+      // Provide more helpful error messages
+      final errorMessage = e.toString();
+      if (errorMessage.contains('اسم المستخدم أو كلمة المرور غير صحيحة')) {
+        // Keep the original Arabic error message
+        throw Exception('اسم المستخدم أو كلمة المرور غير صحيحة');
+      } else if (errorMessage.contains('Supabase not initialized') || 
+                 errorMessage.contains('connection') ||
+                 errorMessage.contains('Network')) {
+        throw Exception('مشكلة في الاتصال. يرجى التحقق من اتصال الإنترنت والمحاولة مرة أخرى.');
+      } else {
+        throw Exception('فشل تسجيل الدخول: ${e.toString()}');
+      }
     }
   }
 
@@ -1112,19 +1137,75 @@ class SupabaseService {
       }
       
       debugPrint('🔍 Searching for user: $username');
-      final response = await client!
-          .from('users')
-          .select()
-          .eq('username', username)
-          .maybeSingle();
+      try {
+        final response = await client!
+            .from('users')
+            .select()
+            .eq('username', username)
+            .maybeSingle();
 
-      if (response == null) {
-        debugPrint('   ❌ User not found in database: $username');
-      } else {
-        debugPrint('   ✅ User found: ${response['name']} (${response['role']})');
+        if (response == null) {
+          debugPrint('   ❌ User not found in database: $username');
+          debugPrint('   💡 Available users in database:');
+          // Try to get all usernames for debugging (if RLS allows)
+          try {
+            final allUsers = await client!.from('users').select('username, name, role');
+            debugPrint('   📋 Found ${allUsers.length} user(s) in database:');
+            for (var u in allUsers) {
+              debugPrint('      - ${u['username']} (${u['name']}, ${u['role']})');
+            }
+          } catch (e) {
+            debugPrint('   ⚠️ Could not list users (RLS restriction): $e');
+          }
+        } else {
+          debugPrint('   ✅ User found: ${response['name']} (${response['role']})');
+          debugPrint('   📋 User details:');
+          debugPrint('      - ID: ${response['id']}');
+          debugPrint('      - Username: ${response['username']}');
+          debugPrint('      - Name: ${response['name']}');
+          debugPrint('      - Role: ${response['role']}');
+          debugPrint('      - Status: ${response['status'] ?? 'not set'}');
+          debugPrint('      - Has password: ${(response['password'] != null && response['password'].toString().isNotEmpty) || (response['password_hash'] != null && response['password_hash'].toString().isNotEmpty)}');
+        }
+
+        return response;
+      } catch (e) {
+        debugPrint('   ❌ Error querying users table: $e');
+        
+        // Check if it's a JWT expired error
+        if (e.toString().contains('JWT expired') || 
+            e.toString().contains('PGRST303') ||
+            e.toString().contains('Unauthorized')) {
+          debugPrint('   ⚠️ JWT expired - clearing session and retrying...');
+          
+          // Clear expired session
+          try {
+            await client!.auth.signOut();
+            debugPrint('   ✅ Cleared expired session');
+          } catch (signOutError) {
+            debugPrint('   ⚠️ Error signing out: $signOutError');
+          }
+          
+          // Retry query without session (using anon key)
+          try {
+            debugPrint('   🔄 Retrying query without session...');
+            final retryResponse = await client!
+                .from('users')
+                .select()
+                .eq('username', username)
+                .maybeSingle();
+            
+            if (retryResponse != null) {
+              debugPrint('   ✅ User found after retry: ${retryResponse['name']} (${retryResponse['role']})');
+              return retryResponse;
+            }
+          } catch (retryError) {
+            debugPrint('   ❌ Retry also failed: $retryError');
+          }
+        }
+        
+        rethrow;
       }
-
-      return response;
     } catch (e) {
       debugPrint('❌ Error in getUserByUsername: $e');
       // Log full error details
@@ -1132,6 +1213,24 @@ class SupabaseService {
         debugPrint('   Error type: ${e.runtimeType}');
         debugPrint('   Error message: ${e.toString()}');
       }
+      
+      // Check if it's a network/connection error
+      if (e.toString().contains('SocketException') || 
+          e.toString().contains('Network') ||
+          e.toString().contains('connection') ||
+          e.toString().contains('timeout')) {
+        debugPrint('   ⚠️ Network/Connection error detected');
+        debugPrint('   💡 Please check your internet connection');
+      }
+      
+      // Check if it's a JWT expired error
+      if (e.toString().contains('JWT expired') || 
+          e.toString().contains('PGRST303') ||
+          e.toString().contains('Unauthorized')) {
+        debugPrint('   ⚠️ JWT expired - this usually means the session needs to be refreshed');
+        debugPrint('   💡 Try logging out and logging in again');
+      }
+      
       // If Supabase is not configured, return null (fallback to local auth)
       return null;
     }

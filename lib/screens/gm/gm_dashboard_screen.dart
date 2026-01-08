@@ -38,6 +38,7 @@ class GMDashboardScreen extends StatefulWidget {
 class _GMDashboardScreenState extends State<GMDashboardScreen> {
   Map<String, String?> _coachProfilePictures = {}; // Map of coach name -> profile_picture_url
   Map<String, String> _coachNames = {}; // Map of coach ID -> coach name
+  Map<String, String> _pmMslIdsByRole = {}; // Map of role (pm/msl) -> first coach ID for that role
   int _unreadNotificationsCount = 0;
   Timer? _notificationsTimer;
   int _totalCoaches = 0; // Total coaches count from users table
@@ -466,18 +467,27 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
       final msls = await SupabaseService.getAllMSLs();
       
       final coachNamesMap = <String, String>{};
+      final pmMslIdsByRole = <String, String>{};
+      
       for (final coach in [...dms, ...fts, ...pms, ...msls]) {
         final id = (coach['id'] ?? '').toString();
         final name = (coach['name'] ?? '').toString();
+        final role = (coach['role'] ?? '').toString().toLowerCase();
         if (id.isNotEmpty && name.isNotEmpty) {
           coachNamesMap[id] = name;
+          // Store first PM/MSL ID for each role
+          if ((role == 'pm' || role == 'msl') && !pmMslIdsByRole.containsKey(role)) {
+            pmMslIdsByRole[role] = id;
+          }
         }
       }
       
       debugPrint('   ✅ Loaded ${coachNamesMap.length} coach names');
+      debugPrint('   ✅ PM/MSL IDs by role: $pmMslIdsByRole');
       if (mounted) {
         setState(() {
           _coachNames = coachNamesMap;
+          _pmMslIdsByRole = pmMslIdsByRole;
         });
       }
     } catch (e) {
@@ -537,7 +547,45 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
     }
   }
 
-  Future<String?> _getCoachName(String coachId, String? coachRole) async {
+  Future<String?> _getCoachName(String? coachId, String? coachRole) async {
+    // If coachId is null or empty, try to find PM/MSL by role from Supabase
+    if (coachId == null || coachId.isEmpty) {
+      if (coachRole == 'pm' || coachRole == 'msl') {
+        final roleUpper = coachRole?.toUpperCase() ?? 'UNKNOWN';
+        debugPrint('   🔍 GM Dashboard: coachId is null, searching for $roleUpper from Supabase...');
+        try {
+          List<Map<String, dynamic>> coaches;
+          if (coachRole == 'pm') {
+            coaches = await SupabaseService.getAllPMs();
+          } else {
+            coaches = await SupabaseService.getAllMSLs();
+          }
+          
+          if (coaches.isNotEmpty) {
+            // Use the first PM/MSL found (usually there's only one per role, or use the first one)
+            final coach = coaches.first;
+            final id = (coach['id'] ?? '').toString();
+            final name = (coach['name'] ?? '').toString();
+            if (id.isNotEmpty && name.isNotEmpty) {
+              debugPrint('   ✅ GM Dashboard: Found $roleUpper from Supabase: $name (ID: $id)');
+              // Cache it for future use
+              if (mounted) {
+                setState(() {
+                  _coachNames[id] = name;
+                });
+              }
+              return name;
+            }
+          } else {
+            debugPrint('   ⚠️ GM Dashboard: No $roleUpper found in Supabase');
+          }
+        } catch (e) {
+          debugPrint('   ❌ Error fetching $roleUpper from Supabase: $e');
+        }
+      }
+      return null;
+    }
+    
     // First check cache
     if (_coachNames.containsKey(coachId)) {
       return _coachNames[coachId];
@@ -728,15 +776,23 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
             // Use cached name
             coachName = '${_coachNames[coachId]} (${coachRole.toUpperCase()})';
             debugPrint('   ✅ Triple Visit: Using cached coachName: ${_coachNames[coachId]}');
-          } else if (coachId != null && coachId.isNotEmpty) {
-            // If coachId is available but not in cache, use placeholder
-            // The actual name will be fetched in the UI (FutureBuilder) to avoid blocking
-            debugPrint('   ⚠️ Triple Visit: coachId available but not in cache, will fetch in UI. coachId: $coachId, role: $coachRole');
-            coachName = 'Coach (${coachRole.toUpperCase()})';
           } else {
-            // Fallback: use placeholder (never use dmName for Triple Visit)
-            debugPrint('   ⚠️ Triple Visit: No coachId available, using placeholder. dmId=${report.dmId}, dmName=${report.dmName}');
-            coachName = 'Coach (${coachRole.toUpperCase()})';
+            // Fallback: use first PM/MSL from loaded coaches by role
+            final roleLower = coachRole?.toLowerCase() ?? '';
+            final roleUpper = coachRole?.toUpperCase() ?? 'UNKNOWN';
+            debugPrint('   ⚠️ Triple Visit: No coachId available, using first $roleUpper from loaded coaches...');
+            if (_pmMslIdsByRole.containsKey(roleLower)) {
+              final firstPmMslId = _pmMslIdsByRole[roleLower]!;
+              if (_coachNames.containsKey(firstPmMslId)) {
+                final name = _coachNames[firstPmMslId]!;
+                coachName = '$name ($roleUpper)';
+                debugPrint('   ✅ Triple Visit: Using first $roleUpper from loaded coaches: $name');
+              } else {
+                coachName = 'Coach ($roleUpper)';
+              }
+            } else {
+              coachName = 'Coach ($roleUpper)';
+            }
           }
         } else {
           // For Single/Double visits, dmId contains the coach ID
@@ -1548,50 +1604,26 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
                                                     Row(
                                                       children: [
                                                         Expanded(
-                                                          child: FutureBuilder<String?>(
-                                                            future: () async {
+                                                          child: Builder(
+                                                            builder: (context) {
                                                               final coachId = dm['coachId'] as String?;
                                                               final role = dm['role'] as String?;
-                                                              debugPrint('   🔍 GM Dashboard: Fetching coach name for coachId: $coachId, role: $role');
-                                                              // For Triple Visit reports, coachId should already be the correct MSL/PM ID
-                                                              // But we need to fetch the name from Supabase to ensure it's correct
+                                                              String? actualCoachName;
+                                                              
                                                               if (coachId != null && coachId.isNotEmpty) {
-                                                                // First check cache
-                                                                if (_coachNames.containsKey(coachId)) {
-                                                                  debugPrint('   ✅ GM Dashboard: Found coach name in cache: ${_coachNames[coachId]}');
-                                                                  return _coachNames[coachId];
+                                                                // Use cached name directly
+                                                                actualCoachName = _coachNames[coachId];
+                                                              } else if (role == 'pm' || role == 'msl') {
+                                                                // If coachId is null, use first PM/MSL from loaded coaches
+                                                                final roleLower = role?.toLowerCase() ?? '';
+                                                                if (_pmMslIdsByRole.containsKey(roleLower)) {
+                                                                  final firstPmMslId = _pmMslIdsByRole[roleLower]!;
+                                                                  actualCoachName = _coachNames[firstPmMslId];
                                                                 }
-                                                                // Then fetch from Supabase
-                                                                debugPrint('   🔍 GM Dashboard: Fetching coach name from Supabase for coachId: $coachId');
-                                                                final fetchedName = await _getCoachName(coachId, role);
-                                                                if (fetchedName != null && fetchedName.isNotEmpty) {
-                                                                  debugPrint('   ✅ GM Dashboard: Fetched coach name from Supabase: $fetchedName');
-                                                                  return fetchedName;
-                                                                } else {
-                                                                  debugPrint('   ⚠️ GM Dashboard: Could not fetch coach name from Supabase');
-                                                                }
-                                                              } else {
-                                                                debugPrint('   ⚠️ GM Dashboard: coachId is null or empty');
                                                               }
-                                                              return null;
-                                                            }(),
-                                                            builder: (context, snapshot) {
-                                                              // For Triple Visit: use fetched name from Supabase only (never use dm['fullName'] as it might be DM name)
-                                                              // The fetched name is the correct MSL/PM name fetched using coachId
-                                                              if (snapshot.connectionState == ConnectionState.waiting) {
-                                                                return const Text(
-                                                                  'Loading...',
-                                                                  style: TextStyle(
-                                                                    fontSize: 16,
-                                                                    fontWeight: FontWeight.w600,
-                                                                    color: AppColors.gray900,
-                                                                  ),
-                                                                );
-                                                              }
-                                                              final actualCoachName = snapshot.data;
+                                                              
                                                               if (actualCoachName == null || actualCoachName.isEmpty) {
-                                                                // If fetch failed, use coachId to identify (never use dm['fullName'])
-                                                                final role = dm['role'] as String?;
+                                                                // Fallback: use role
                                                                 return Text(
                                                                   'Coach (${role?.toUpperCase() ?? 'Unknown'})',
                                                                   style: const TextStyle(
@@ -1599,8 +1631,11 @@ class _GMDashboardScreenState extends State<GMDashboardScreen> {
                                                                     fontWeight: FontWeight.w600,
                                                                     color: AppColors.gray900,
                                                                   ),
+                                                                  overflow: TextOverflow.ellipsis,
+                                                                  maxLines: 1,
                                                                 );
                                                               }
+                                                              
                                                               return Text(
                                                                 actualCoachName,
                                                                 style: const TextStyle(

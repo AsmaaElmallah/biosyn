@@ -2863,7 +2863,7 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                           crossAxisAlignment: CrossAxisAlignment.start,
                                           children: [
                                             const Text(
-                                              'MR Feedback Comments',
+                                              'Comments and Insights',
                                               style: TextStyle(
                                                 color: AppColors.gray600,
                                                 fontSize: 14,
@@ -2965,7 +2965,7 @@ class _PMMSLDashboardScreenState extends State<PMMSLDashboardScreen> {
                                           crossAxisAlignment: CrossAxisAlignment.start,
                                           children: [
                                             const Text(
-                                              'MR Feedback Comments',
+                                              'Comments and Insights',
                                               style: TextStyle(
                                                 color: AppColors.gray600,
                                                 fontSize: 14,

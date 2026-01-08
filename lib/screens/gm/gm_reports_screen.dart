@@ -151,6 +151,42 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
         }
       }
       
+      // For Triple Visit reports without coachId, pre-load PM/MSL names
+      // This ensures names are available immediately without FutureBuilder
+      // Store PM/MSL IDs by role for quick lookup
+      String? firstPMId;
+      String? firstMSLId;
+      if (pms.isNotEmpty) {
+        firstPMId = (pms.first['id'] ?? '').toString();
+        if (firstPMId.isNotEmpty && !coachNamesMap.containsKey(firstPMId)) {
+          final pmName = (pms.first['name'] ?? '').toString();
+          if (pmName.isNotEmpty) {
+            coachNamesMap[firstPMId] = pmName;
+          }
+        }
+      }
+      if (msls.isNotEmpty) {
+        firstMSLId = (msls.first['id'] ?? '').toString();
+        if (firstMSLId.isNotEmpty && !coachNamesMap.containsKey(firstMSLId)) {
+          final mslName = (msls.first['name'] ?? '').toString();
+          if (mslName.isNotEmpty) {
+            coachNamesMap[firstMSLId] = mslName;
+          }
+        }
+      }
+      
+      // Store PM/MSL IDs for Triple Visit reports without coachId
+      // IMPORTANT: Store default PM/MSL names in coachNamesMap BEFORE assigning to _coachNames
+      // This ensures _pm_default and _msl_default are always available
+      if (firstPMId != null && firstPMId.isNotEmpty && coachNamesMap.containsKey(firstPMId)) {
+        coachNamesMap['_pm_default'] = coachNamesMap[firstPMId]!;
+        debugPrint('   ✅ Stored _pm_default: ${coachNamesMap[firstPMId]}');
+      }
+      if (firstMSLId != null && firstMSLId.isNotEmpty && coachNamesMap.containsKey(firstMSLId)) {
+        coachNamesMap['_msl_default'] = coachNamesMap[firstMSLId]!;
+        debugPrint('   ✅ Stored _msl_default: ${coachNamesMap[firstMSLId]}');
+      }
+      
       debugPrint('   ✅ Loaded ${coachNamesMap.length} coach names');
       if (mounted) {
         setState(() {
@@ -163,7 +199,43 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
   }
 
   Future<String?> _getCoachName(String? coachId, String? coachRole) async {
-    if (coachId == null || coachId.isEmpty) return null;
+    // If coachId is null or empty, try to find PM/MSL by role from Supabase
+    if (coachId == null || coachId.isEmpty) {
+      if (coachRole == 'pm' || coachRole == 'msl') {
+        final roleUpper = coachRole?.toUpperCase() ?? 'UNKNOWN';
+        debugPrint('   🔍 Triple Visit: coachId is null, searching for $roleUpper from Supabase...');
+        try {
+          List<Map<String, dynamic>> coaches;
+          if (coachRole == 'pm') {
+            coaches = await SupabaseService.getAllPMs();
+          } else {
+            coaches = await SupabaseService.getAllMSLs();
+          }
+          
+          if (coaches.isNotEmpty) {
+            // Use the first PM/MSL found (usually there's only one per role, or use the first one)
+            final coach = coaches.first;
+            final id = (coach['id'] ?? '').toString();
+            final name = (coach['name'] ?? '').toString();
+            if (id.isNotEmpty && name.isNotEmpty) {
+              debugPrint('   ✅ Triple Visit: Found $roleUpper from Supabase: $name (ID: $id)');
+              // Cache it for future use
+              if (mounted) {
+                setState(() {
+                  _coachNames[id] = name;
+                });
+              }
+              return name;
+            }
+          } else {
+            debugPrint('   ⚠️ Triple Visit: No $roleUpper found in Supabase');
+          }
+        } catch (e) {
+          debugPrint('   ❌ Error fetching $roleUpper from Supabase: $e');
+        }
+      }
+      return null;
+    }
     
     // First check cache
     if (_coachNames.containsKey(coachId)) {
@@ -199,20 +271,16 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
     if (isPMMSL) {
       // For PM/MSL reports:
       // - In Single/Double visits: dmId contains the coach ID
-      // - In Triple visits: use coachId if available (from model), otherwise try to find from other reports
+      // - In Triple visits: use coachId if available (from model), DO NOT use dmId as fallback
       if (report.typeOfVisit == 'Triple') {
         // For Triple Visit: use coachId directly from model if available
+        // DO NOT fallback to dmId - that's the DM's ID, not the PM/MSL coach ID
         if (report.coachId != null && report.coachId!.isNotEmpty) {
           return report.coachId;
         }
-        // Fallback: try to find coach ID from Single/Double visits with same coachRole
-        final similarReport = widget.reports.firstWhere(
-          (r) => r.coachRole == coachRole && 
-                 r.typeOfVisit != 'Triple' && 
-                 r.dmId.isNotEmpty,
-          orElse: () => report,
-        );
-        return similarReport.dmId;
+        // If coachId is not available, return null (will use coachName from model instead)
+        debugPrint('   ⚠️ Triple Visit: No coachId available for ${report.coachRole}. Will use coachName from model.');
+        return null;
       } else {
         // For Single/Double visits, dmId contains the coach ID
         return report.dmId;
@@ -898,7 +966,8 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                                 child: InkWell(
                                   onTap: () async {
                                     try {
-                                      final filePath = await ExportUtils.exportAllReportsToText(widget.reports);
+                                      // GM should see Location
+                                      final filePath = await ExportUtils.exportAllReportsToText(widget.reports, showLocation: true);
                                       if (mounted) {
                                         ScaffoldMessenger.of(context).showSnackBar(
                                           SnackBar(
@@ -1217,28 +1286,68 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                                                         ),
                                                         const SizedBox(height: 4),
                                                         // Show PM/MSL + name
-                                                        FutureBuilder<String?>(
-                                                          future: _getCoachName(_getCoachIdFromReport(report), report.coachRole),
-                                                          builder: (context, snapshot) {
-                                                            final coachName = snapshot.data ?? 'Loading...';
+                                                        Builder(
+                                                          builder: (context) {
                                                             final coachRole = report.coachRole ?? 'pm';
                                                             final roleAbbrev = coachRole == 'pm' ? 'PM' : coachRole == 'msl' ? 'MSL' : coachRole.toUpperCase();
-                                                            return Row(
-                                                              children: [
-                                                                const Icon(Icons.person_outline, size: 14, color: AppColors.gray400),
-                                                                const SizedBox(width: 4),
-                                                                Expanded(
-                                                                  child: Text(
-                                                                    '$roleAbbrev: $coachName',
-                                                                    style: const TextStyle(
-                                                                      color: AppColors.gray600,
-                                                                      fontSize: 12,
+                                                            // For Triple Visit, use coachName directly from model if available
+                                                            if (report.typeOfVisit == 'Triple' && report.coachName != null && report.coachName!.isNotEmpty) {
+                                                              return Row(
+                                                                children: [
+                                                                  const Icon(Icons.person_outline, size: 14, color: AppColors.gray400),
+                                                                  const SizedBox(width: 4),
+                                                                  Expanded(
+                                                                    child: Text(
+                                                                      '$roleAbbrev: ${report.coachName}',
+                                                                      style: const TextStyle(
+                                                                        color: AppColors.gray600,
+                                                                        fontSize: 12,
+                                                                      ),
+                                                                      overflow: TextOverflow.ellipsis,
                                                                     ),
-                                                                    overflow: TextOverflow.ellipsis,
                                                                   ),
-                                                                ),
-                                                              ],
-                                                            );
+                                                                ],
+                                                              );
+                                                            } else {
+                                                              // For Triple Visit without coachName, get from cache or use pre-loaded PM/MSL name
+                                                              final coachId = _getCoachIdFromReport(report);
+                                                              String coachName;
+                                                              
+                                                              if (coachId != null && coachId.isNotEmpty && _coachNames.containsKey(coachId)) {
+                                                                coachName = _coachNames[coachId]!;
+                                                              } else if (coachId == null || coachId.isEmpty) {
+                                                                // If coachId is null in Triple Visit, MUST use pre-loaded PM/MSL name
+                                                                // NEVER use dmName as it's the coached DM, not the coach
+                                                                if (report.coachRole == 'pm' && _coachNames.containsKey('_pm_default') && _coachNames['_pm_default']!.isNotEmpty) {
+                                                                  coachName = _coachNames['_pm_default']!;
+                                                                } else if (report.coachRole == 'msl' && _coachNames.containsKey('_msl_default') && _coachNames['_msl_default']!.isNotEmpty) {
+                                                                  coachName = _coachNames['_msl_default']!;
+                                                                } else {
+                                                                  // Fallback: use role abbreviation if no name found
+                                                                  coachName = report.coachRole?.toUpperCase() ?? 'Unknown';
+                                                                }
+                                                              } else {
+                                                                // If coachId exists but not in cache, use role abbreviation
+                                                                coachName = report.coachRole?.toUpperCase() ?? 'Unknown';
+                                                              }
+                                                              
+                                                              return Row(
+                                                                children: [
+                                                                  const Icon(Icons.person_outline, size: 14, color: AppColors.gray400),
+                                                                  const SizedBox(width: 4),
+                                                                  Expanded(
+                                                                    child: Text(
+                                                                      '$roleAbbrev: $coachName',
+                                                                      style: const TextStyle(
+                                                                        color: AppColors.gray600,
+                                                                        fontSize: 12,
+                                                                      ),
+                                                                      overflow: TextOverflow.ellipsis,
+                                                                    ),
+                                                                  ),
+                                                                ],
+                                                              );
+                                                            }
                                                           },
                                                         ),
                                                         const SizedBox(height: 2),
@@ -1768,14 +1877,29 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                               if (report.typeOfVisit == 'Triple' && report.coachName != null && report.coachName!.isNotEmpty) {
                                 return _buildModalInfoItem('Coach Role', '$roleLabel: ${report.coachName}');
                               } else {
-                                // For other visits, fetch from Supabase
-                                return FutureBuilder<String?>(
-                                  future: _getCoachName(_getCoachIdFromReport(report), report.coachRole),
-                                  builder: (context, snapshot) {
-                                    final coachName = snapshot.data ?? _getCoachNameFromReport(report) ?? 'Loading...';
-                                    return _buildModalInfoItem('Coach Role', '$roleLabel: $coachName');
-                                  },
-                                );
+                                // For Triple Visit without coachName, get from cache or use pre-loaded PM/MSL name
+                                final coachId = _getCoachIdFromReport(report);
+                                String coachName;
+                                
+                                if (coachId != null && coachId.isNotEmpty && _coachNames.containsKey(coachId)) {
+                                  coachName = _coachNames[coachId]!;
+                                } else if (coachId == null || coachId.isEmpty) {
+                                  // If coachId is null in Triple Visit, MUST use pre-loaded PM/MSL name
+                                  // NEVER use dmName as it's the coached DM, not the coach
+                                  if (report.coachRole == 'pm' && _coachNames.containsKey('_pm_default') && _coachNames['_pm_default']!.isNotEmpty) {
+                                    coachName = _coachNames['_pm_default']!;
+                                  } else if (report.coachRole == 'msl' && _coachNames.containsKey('_msl_default') && _coachNames['_msl_default']!.isNotEmpty) {
+                                    coachName = _coachNames['_msl_default']!;
+                                  } else {
+                                    // Fallback: use role abbreviation if no name found
+                                    coachName = report.coachRole?.toUpperCase() ?? 'Unknown';
+                                  }
+                                } else {
+                                  // If coachId exists but not in cache, use role abbreviation
+                                  coachName = report.coachRole?.toUpperCase() ?? 'Unknown';
+                                }
+                                
+                                return _buildModalInfoItem('Coach Role', '$roleLabel: $coachName');
                               }
                             },
                           ),
@@ -2056,7 +2180,7 @@ class _GMReportsScreenState extends State<GMReportsScreen> {
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       const Text(
-                                        'MR Feedback Comments and Insights',
+                                        'Comments and Insights',
                                         style: TextStyle(
                                           color: AppColors.gray600,
                                           fontSize: 14,

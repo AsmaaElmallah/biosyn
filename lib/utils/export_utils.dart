@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:biosyn_report_flutter/models/coaching_report.dart';
+import 'package:biosyn_report_flutter/services/supabase_service.dart';
 import 'package:intl/intl.dart';
 import 'package:syncfusion_flutter_xlsio/xlsio.dart';
 
@@ -66,7 +67,7 @@ class ExportUtils {
   }
   
 // Export single report to Excel
-  static Future<String> exportSingleReportToText(CoachingReport report) async {
+  static Future<String> exportSingleReportToText(CoachingReport report, {bool showLocation = true}) async {
     final Workbook workbook = Workbook();
     final Worksheet sheet = workbook.worksheets[0];
     sheet.name = 'Coaching Report';
@@ -130,25 +131,55 @@ class ExportUtils {
     row++;
     
     // Coach Name - Handle Triple Visit correctly
-    setCell(1, row, 'Coach:');
     if (report.typeOfVisit == 'Triple' && isPMMSL) {
-      // For Triple Visit: use coachName if available (from model), otherwise use full role label
+      // For Triple Visit: use full role label and coach name
+      final roleLabel = report.coachRole == 'pm' 
+          ? 'Product Manager (PM):' 
+          : 'Medical Science Liaison (MSL):';
+      setCell(1, row, roleLabel, style: 'label');
+      
+      // Get coach name - use coachName from model if available, otherwise fetch from Supabase
+      String coachName = '';
       if (report.coachName != null && report.coachName!.isNotEmpty) {
-        // Use full role label like in View: "Medical Science Liaison (MSL)" or "Product Manager (PM)"
-        final roleLabel = report.coachRole == 'pm' 
-            ? 'Product Manager (PM)' 
-            : 'Medical Science Liaison (MSL)';
-        setCell(1, row, '$roleLabel: ${report.coachName}');
-      } else {
-        // Fallback: use full role label only
-        final roleLabel = report.coachRole == 'pm' 
-            ? 'Product Manager (PM)' 
-            : 'Medical Science Liaison (MSL)';
-        setCell(1, row, roleLabel);
+        coachName = report.coachName!;
+      } else if (report.coachId != null && report.coachId!.isNotEmpty) {
+        // Try to fetch from Supabase if coachId is available
+        try {
+          final user = await SupabaseService.getUserById(report.coachId!);
+          if (user != null) {
+            final name = (user['name'] ?? '').toString();
+            if (name.isNotEmpty) {
+              coachName = name;
+            }
+          }
+        } catch (e) {
+          debugPrint('   ⚠️ Error fetching coach name for export: $e');
+        }
       }
+      
+      // If still empty, try to get first PM/MSL from Supabase
+      if (coachName.isEmpty) {
+        try {
+          List<Map<String, dynamic>> coaches;
+          if (report.coachRole == 'pm') {
+            coaches = await SupabaseService.getAllPMs();
+          } else {
+            coaches = await SupabaseService.getAllMSLs();
+          }
+          if (coaches.isNotEmpty) {
+            coachName = (coaches.first['name'] ?? '').toString();
+          }
+        } catch (e) {
+          debugPrint('   ⚠️ Error fetching PM/MSL list for export: $e');
+        }
+      }
+      
+      // Set coach name in column B
+      setCell(2, row, coachName.isNotEmpty ? coachName : (report.coachRole?.toUpperCase() ?? 'Unknown'));
     } else {
       // For other visits: dmName is the coach
-        setCell(2, row, '${report.dmName}${report.coachRole != null ? ' (${report.coachRole!.toUpperCase()})' : ''}');
+      setCell(1, row, 'Coach:', style: 'label');
+      setCell(2, row, '${report.dmName}${report.coachRole != null ? ' (${report.coachRole!.toUpperCase()})' : ''}');
     }
     row++;
     
@@ -200,7 +231,7 @@ class ExportUtils {
     }
     
     // Location
-    if (report.googleMapsUrl != null && report.googleMapsUrl!.isNotEmpty) {
+    if (showLocation && report.googleMapsUrl != null && report.googleMapsUrl!.isNotEmpty) {
       setCell(1, row, 'Location:', style: 'label');
       setCell(2, row, report.googleMapsUrl!);
       row++;
@@ -352,7 +383,7 @@ class ExportUtils {
           row++;
         }
         if (report.mrFeedbackComments != null && report.mrFeedbackComments!.isNotEmpty) {
-          setCell(1, row, 'MR Feedback Comments:');
+          setCell(1, row, 'Comments and Insights:');
           setCell(2, row, report.mrFeedbackComments!);
           row++;
         }
@@ -481,7 +512,7 @@ class ExportUtils {
   }
 
   // Export monthly report to Excel
-  static Future<String> exportMonthlyReport(List<CoachingReport> reports, String? dmName) async {
+  static Future<String> exportMonthlyReport(List<CoachingReport> reports, String? dmName, {bool showLocation = true}) async {
     final now = DateTime.now();
     final monthName = DateFormat('MMMM yyyy').format(now);
 
@@ -615,9 +646,14 @@ class ExportUtils {
     setCell(28, row, 'Areas of Improvement', style: 'tableHeader');
     setCell(29, row, 'Filled with MR', style: 'tableHeader');
     setCell(30, row, 'Brick Name', style: 'tableHeader');
-    setCell(31, row, 'Location', style: 'tableHeader');
-    setCell(32, row, 'Visits Count', style: 'tableHeader');
-    setCell(33, row, 'Doctors Visited', style: 'tableHeader');
+    if (showLocation) {
+      setCell(31, row, 'Location', style: 'tableHeader');
+      setCell(32, row, 'Visits Count', style: 'tableHeader');
+      setCell(33, row, 'Doctors Visited', style: 'tableHeader');
+    } else {
+      setCell(31, row, 'Visits Count', style: 'tableHeader');
+      setCell(32, row, 'Doctors Visited', style: 'tableHeader');
+    }
     row++;
     
     // Data rows
@@ -625,10 +661,53 @@ class ExportUtils {
       final isPMMSL = report.coachRole == 'pm' || report.coachRole == 'msl';
       final isTripleVisit = report.typeOfVisit == 'Triple' && isPMMSL;
       
-      // Get coach name - for Triple Visit use coachName, otherwise use dmName
-      final coachName = isTripleVisit && report.coachName != null && report.coachName!.isNotEmpty
-          ? report.coachName!
-          : report.dmName;
+      // Get coach name - for Triple Visit use coachName or fetch from Supabase, otherwise use dmName
+      String coachName;
+      if (isTripleVisit) {
+        if (report.coachName != null && report.coachName!.isNotEmpty) {
+          coachName = report.coachName!;
+        } else if (report.coachId != null && report.coachId!.isNotEmpty) {
+          // Try to fetch from Supabase if coachId is available
+          try {
+            final user = await SupabaseService.getUserById(report.coachId!);
+            if (user != null) {
+              final name = (user['name'] ?? '').toString();
+              if (name.isNotEmpty) {
+                coachName = name;
+              } else {
+                coachName = report.dmName; // Fallback
+              }
+            } else {
+              coachName = report.dmName; // Fallback
+            }
+          } catch (e) {
+            debugPrint('   ⚠️ Error fetching coach name for export: $e');
+            coachName = report.dmName; // Fallback
+          }
+        } else {
+          // If no coachId, try to get first PM/MSL from Supabase
+          try {
+            List<Map<String, dynamic>> coaches;
+            if (report.coachRole == 'pm') {
+              coaches = await SupabaseService.getAllPMs();
+            } else {
+              coaches = await SupabaseService.getAllMSLs();
+            }
+            if (coaches.isNotEmpty) {
+              final name = (coaches.first['name'] ?? '').toString();
+              coachName = name.isNotEmpty ? name : report.dmName;
+            } else {
+              coachName = report.dmName; // Fallback
+            }
+          } catch (e) {
+            debugPrint('   ⚠️ Error fetching PM/MSL list for export: $e');
+            coachName = report.dmName; // Fallback
+          }
+        }
+      } else {
+        // For other visits: dmName is the coach
+        coachName = report.dmName;
+      }
       
       final score = report.getAverageScore().toStringAsFixed(2);
       final strengths = (report.strengths ?? '').replaceAll('\n', ' ');
@@ -666,9 +745,14 @@ class ExportUtils {
       setCell(28, row, improvementsShort);
       setCell(29, row, report.filledWithMR ?? '');
       setCell(30, row, report.brickName ?? '');
-      setCell(31, row, report.googleMapsUrl ?? '');
-      setCell(32, row, report.visitCount?.toString() ?? '');
-      setCell(33, row, report.doctorsVisited ?? '');
+      if (showLocation) {
+        setCell(31, row, report.googleMapsUrl ?? '');
+        setCell(32, row, report.visitCount?.toString() ?? '');
+        setCell(33, row, report.doctorsVisited ?? '');
+      } else {
+        setCell(31, row, report.visitCount?.toString() ?? '');
+        setCell(32, row, report.doctorsVisited ?? '');
+      }
       row++;
     }
     
@@ -683,7 +767,8 @@ class ExportUtils {
     
     // Auto-fit all columns based on content (including headers)
     // This ensures headers with multiple words are fully visible
-    for (int col = 1; col <= 33; col++) {
+    final maxColumn = showLocation ? 33 : 32;
+    for (int col = 1; col <= maxColumn; col++) {
       // First, auto-fit the column
       sheet.autoFitColumn(col);
       
@@ -711,7 +796,7 @@ class ExportUtils {
   }
 
   // Export all reports to Excel
-  static Future<String> exportAllReportsToText(List<CoachingReport> reports) async {
+  static Future<String> exportAllReportsToText(List<CoachingReport> reports, {bool showLocation = true}) async {
     if (reports.isEmpty) {
       throw Exception('No reports to export');
     }
@@ -805,21 +890,39 @@ class ExportUtils {
     setCell(28, row, 'Areas of Improvement', style: 'tableHeader');
     setCell(29, row, 'Filled with MR', style: 'tableHeader');
     setCell(30, row, 'Brick Name', style: 'tableHeader');
-    setCell(31, row, 'Location', style: 'tableHeader');
-    setCell(32, row, 'Visits Count', style: 'tableHeader');
-    setCell(33, row, 'Doctors Visited', style: 'tableHeader');
-    setCell(34, row, 'Type of Visit', style: 'tableHeader');
-    setCell(35, row, 'Visited Accounts', style: 'tableHeader');
-    setCell(36, row, 'General Feedback', style: 'tableHeader');
-    setCell(37, row, 'Teamwork', style: 'tableHeader');
-    setCell(38, row, 'Customer Awareness', style: 'tableHeader');
-    setCell(39, row, 'Medical Product Knowledge DM', style: 'tableHeader');
-    setCell(40, row, 'DM Feedback Comments', style: 'tableHeader');
-    setCell(41, row, 'Patient Centric Approach', style: 'tableHeader');
-    setCell(42, row, 'Medical Product Knowledge MR', style: 'tableHeader');
-    setCell(43, row, 'Feature Benefits', style: 'tableHeader');
-    setCell(44, row, 'Closing Commitment', style: 'tableHeader');
-    setCell(45, row, 'MR Feedback Comments', style: 'tableHeader');
+    if (showLocation) {
+      setCell(31, row, 'Location', style: 'tableHeader');
+      setCell(32, row, 'Visits Count', style: 'tableHeader');
+      setCell(33, row, 'Doctors Visited', style: 'tableHeader');
+      setCell(34, row, 'Type of Visit', style: 'tableHeader');
+    } else {
+      setCell(31, row, 'Visits Count', style: 'tableHeader');
+      setCell(32, row, 'Doctors Visited', style: 'tableHeader');
+      setCell(33, row, 'Type of Visit', style: 'tableHeader');
+    }
+    final visitedAccountsHeaderCol = showLocation ? 35 : 34;
+    final generalFeedbackHeaderCol = showLocation ? 36 : 35;
+    final teamworkHeaderCol = showLocation ? 37 : 36;
+    final customerAwarenessHeaderCol = showLocation ? 38 : 37;
+    final medicalProductKnowledgeDMHeaderCol = showLocation ? 39 : 38;
+    final dmFeedbackCommentsHeaderCol = showLocation ? 40 : 39;
+    final patientCentricApproachHeaderCol = showLocation ? 41 : 40;
+    final medicalProductKnowledgeMRHeaderCol = showLocation ? 42 : 41;
+    final featureBenefitsHeaderCol = showLocation ? 43 : 42;
+    final closingCommitmentHeaderCol = showLocation ? 44 : 43;
+    final mrFeedbackCommentsHeaderCol = showLocation ? 45 : 44;
+    
+    setCell(visitedAccountsHeaderCol, row, 'Visited Accounts', style: 'tableHeader');
+    setCell(generalFeedbackHeaderCol, row, 'General Feedback', style: 'tableHeader');
+    setCell(teamworkHeaderCol, row, 'Teamwork', style: 'tableHeader');
+    setCell(customerAwarenessHeaderCol, row, 'Customer Awareness', style: 'tableHeader');
+    setCell(medicalProductKnowledgeDMHeaderCol, row, 'Medical Product Knowledge DM', style: 'tableHeader');
+    setCell(dmFeedbackCommentsHeaderCol, row, 'DM Feedback Comments', style: 'tableHeader');
+    setCell(patientCentricApproachHeaderCol, row, 'Patient Centric Approach', style: 'tableHeader');
+    setCell(medicalProductKnowledgeMRHeaderCol, row, 'Medical Product Knowledge MR', style: 'tableHeader');
+    setCell(featureBenefitsHeaderCol, row, 'Feature Benefits', style: 'tableHeader');
+    setCell(closingCommitmentHeaderCol, row, 'Closing Commitment', style: 'tableHeader');
+    setCell(mrFeedbackCommentsHeaderCol, row, 'Comments and Insights', style: 'tableHeader');
     row++;
     
     // Data rows
@@ -828,10 +931,53 @@ class ExportUtils {
       final isDMReport = isPMMSL && (report.customerAwareness != null || report.medicalProductKnowledgeDM != null);
       final isTripleVisit = report.typeOfVisit == 'Triple' && isPMMSL;
       
-      // Get coach name - for Triple Visit use coachName, otherwise use dmName
-      final coachName = isTripleVisit && report.coachName != null && report.coachName!.isNotEmpty
-          ? report.coachName!
-          : report.dmName;
+      // Get coach name - for Triple Visit use coachName or fetch from Supabase, otherwise use dmName
+      String coachName;
+      if (isTripleVisit) {
+        if (report.coachName != null && report.coachName!.isNotEmpty) {
+          coachName = report.coachName!;
+        } else if (report.coachId != null && report.coachId!.isNotEmpty) {
+          // Try to fetch from Supabase if coachId is available
+          try {
+            final user = await SupabaseService.getUserById(report.coachId!);
+            if (user != null) {
+              final name = (user['name'] ?? '').toString();
+              if (name.isNotEmpty) {
+                coachName = name;
+              } else {
+                coachName = report.dmName; // Fallback
+              }
+            } else {
+              coachName = report.dmName; // Fallback
+            }
+          } catch (e) {
+            debugPrint('   ⚠️ Error fetching coach name for export: $e');
+            coachName = report.dmName; // Fallback
+          }
+        } else {
+          // If no coachId, try to get first PM/MSL from Supabase
+          try {
+            List<Map<String, dynamic>> coaches;
+            if (report.coachRole == 'pm') {
+              coaches = await SupabaseService.getAllPMs();
+            } else {
+              coaches = await SupabaseService.getAllMSLs();
+            }
+            if (coaches.isNotEmpty) {
+              final name = (coaches.first['name'] ?? '').toString();
+              coachName = name.isNotEmpty ? name : report.dmName;
+            } else {
+              coachName = report.dmName; // Fallback
+            }
+          } catch (e) {
+            debugPrint('   ⚠️ Error fetching PM/MSL list for export: $e');
+            coachName = report.dmName; // Fallback
+          }
+        }
+      } else {
+        // For other visits: dmName is the coach
+        coachName = report.dmName;
+      }
       
       final score = isDMReport ? report.getDMScore().toStringAsFixed(2) : report.getAverageScore().toStringAsFixed(2);
       final strengths = (report.strengths ?? '').replaceAll('\n', ' ');
@@ -875,21 +1021,39 @@ class ExportUtils {
       setCell(28, row, improvementsShort);
       setCell(29, row, report.filledWithMR ?? '');
       setCell(30, row, report.brickName ?? report.areaBrickName ?? '');
-      setCell(31, row, report.googleMapsUrl ?? '');
-      setCell(32, row, report.visitCount?.toString() ?? '');
-      setCell(33, row, report.doctorsVisited ?? '');
-      setCell(34, row, report.typeOfVisit ?? '');
-      setCell(35, row, report.visitedAccountsNames ?? '');
-      setCell(36, row, generalFeedbackShort);
-      setCell(37, row, report.teamwork ?? '');
-      setCell(38, row, report.customerAwareness ?? '');
-      setCell(39, row, report.medicalProductKnowledgeDM ?? '');
-      setCell(40, row, dmFeedbackCommentsShort);
-      setCell(41, row, report.patientCentricApproach != null ? '${report.patientCentricApproach}/6' : '');
-      setCell(42, row, report.medicalProductKnowledgeMR != null ? '${report.medicalProductKnowledgeMR}/6' : '');
-      setCell(43, row, report.featureBenefits != null ? '${report.featureBenefits}/6' : '');
-      setCell(44, row, report.closingCommitment != null ? '${report.closingCommitment}/6' : '');
-      setCell(45, row, mrFeedbackCommentsShort);
+      if (showLocation) {
+        setCell(31, row, report.googleMapsUrl ?? '');
+        setCell(32, row, report.visitCount?.toString() ?? '');
+        setCell(33, row, report.doctorsVisited ?? '');
+        setCell(34, row, report.typeOfVisit ?? '');
+      } else {
+        setCell(31, row, report.visitCount?.toString() ?? '');
+        setCell(32, row, report.doctorsVisited ?? '');
+        setCell(33, row, report.typeOfVisit ?? '');
+      }
+      final visitedAccountsCol = showLocation ? 35 : 34;
+      final generalFeedbackCol = showLocation ? 36 : 35;
+      final teamworkCol = showLocation ? 37 : 36;
+      final customerAwarenessCol = showLocation ? 38 : 37;
+      final medicalProductKnowledgeDMCol = showLocation ? 39 : 38;
+      final dmFeedbackCommentsCol = showLocation ? 40 : 39;
+      final patientCentricApproachCol = showLocation ? 41 : 40;
+      final medicalProductKnowledgeMRCol = showLocation ? 42 : 41;
+      final featureBenefitsCol = showLocation ? 43 : 42;
+      final closingCommitmentCol = showLocation ? 44 : 43;
+      final mrFeedbackCommentsCol = showLocation ? 45 : 44;
+      
+      setCell(visitedAccountsCol, row, report.visitedAccountsNames ?? '');
+      setCell(generalFeedbackCol, row, generalFeedbackShort);
+      setCell(teamworkCol, row, report.teamwork ?? '');
+      setCell(customerAwarenessCol, row, report.customerAwareness ?? '');
+      setCell(medicalProductKnowledgeDMCol, row, report.medicalProductKnowledgeDM ?? '');
+      setCell(dmFeedbackCommentsCol, row, dmFeedbackCommentsShort);
+      setCell(patientCentricApproachCol, row, report.patientCentricApproach != null ? '${report.patientCentricApproach}/6' : '');
+      setCell(medicalProductKnowledgeMRCol, row, report.medicalProductKnowledgeMR != null ? '${report.medicalProductKnowledgeMR}/6' : '');
+      setCell(featureBenefitsCol, row, report.featureBenefits != null ? '${report.featureBenefits}/6' : '');
+      setCell(closingCommitmentCol, row, report.closingCommitment != null ? '${report.closingCommitment}/6' : '');
+      setCell(mrFeedbackCommentsCol, row, mrFeedbackCommentsShort);
       row++;
     }
     
@@ -904,7 +1068,8 @@ class ExportUtils {
     
     // Auto-fit all columns based on content (including headers)
     // This ensures headers with multiple words are fully visible
-    for (int col = 1; col <= 45; col++) {
+    final maxColumnAll = showLocation ? 45 : 44;
+    for (int col = 1; col <= maxColumnAll; col++) {
       // First, auto-fit the column
       sheet.autoFitColumn(col);
       
